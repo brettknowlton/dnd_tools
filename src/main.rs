@@ -195,7 +195,7 @@ impl Character {
         map
     }
 
-    fn apply_hash_changes(&self, changes: std::collections::HashMap<String, String>) -> Character {
+    fn apply_hash_changes(&mut self, changes: std::collections::HashMap<String, String>) -> Character {
         let mut new_character = self.clone();
         for (key, value) in changes {
             match key.as_str() {
@@ -316,7 +316,7 @@ fn create_character() -> Character {
             "1" => {
                 println!("Adding more information to the character sheet");
                 character = data_entry(character);
-                input_taken = true;
+                return character
             }
             "2" => input_taken = true,
             _ => println!("Invalid input"),
