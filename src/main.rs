@@ -1,7 +1,5 @@
 use std::{
-    fs,
-    io::{self, Write},
-    path::Path,
+    collections::HashMap, fs, io::{self, Write}, path::Path
 };
 
 use serde::{Deserialize, Serialize};
@@ -195,7 +193,10 @@ impl Character {
         map
     }
 
-    fn apply_hash_changes(&mut self, changes: std::collections::HashMap<String, String>) -> Character {
+    fn apply_hash_changes(
+        &mut self,
+        changes: std::collections::HashMap<String, String>,
+    ) -> Character {
         let mut new_character = self.clone();
         for (key, value) in changes {
             match key.as_str() {
@@ -247,6 +248,11 @@ impl Character {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct Data {
+    data: HashMap<char, Vec<String>>
+}
+
 fn main() -> io::Result<()> {
     println!("Welcome to DnD tools!");
     let mut characters = load_character_files();
@@ -255,11 +261,17 @@ fn main() -> io::Result<()> {
         println!("{:?}\n", character_sheet);
     }
 
+    let mut events = Data {
+        data: HashMap::new()
+    };
+
+
     let mut ending = false;
     while !ending {
         println!("What would you like to do?");
         println!("1. Create a new character");
         println!("2. Display character info");
+        println!("3. Roll Dice");
         println!("0. Exit");
         let mut buffer = String::new();
         io::stdin().read_line(&mut buffer)?;
@@ -268,14 +280,78 @@ fn main() -> io::Result<()> {
                 let new_c = create_character();
                 characters.push(new_c);
                 save_characters(characters.clone());
-            },
+            }
             "2" => display_character_info(),
+            "3" => roll_dice_mode(events),
             "0" => ending = true,
 
             _ => println!("Invalid input"),
         };
     }
     Ok(())
+}
+
+fn roll_dice_mode(events: Data) {
+    let mut ending = false;
+    while !ending {
+        println!("Options:");
+        println!("r(i)d(n) will roll a n sided die i times");
+        let mut buffer = String::new();
+        io::stdin()
+            .read_line(&mut buffer)
+            .expect("Failed to read line");
+        //match on first letter of input
+        match buffer.trim().chars().next() {
+            Some('r') => {
+                roll_dice(&mut buffer);
+            }
+            Some('e') => {
+                add_event(&mut buffer);
+            }
+            Some('q') => ending = true,
+            _ => println!("Invalid input"),
+        }
+    }
+}
+
+fn add_event(buffer: &mut str) {
+    let mut buffer = buffer.trim().to_string();
+    buffer.remove(0);
+
+    match buffer.trim().chars().next() {
+        Some('a') => {
+            
+        }
+        Some('r') => {
+            remove_event_from_file(&mut buffer);
+        }
+        Some('l') => {
+            load_events();
+        }
+        _ => println!("Invalid input"),
+    }
+
+    let mut split = buffer.split(" ");
+    let mut event = split.next().unwrap().to_string();
+    let mut time = split.next().unwrap().to_string();
+    let mut desc = split.next().unwrap().to_string();
+    println!("Event: {}\nTime: {}\nDescription: {}", event, time, desc);
+}
+
+
+fn roll_dice(buffer: &mut str) {
+    let mut buffer = buffer.trim().to_string();
+    buffer.remove(0);
+    let mut split = buffer.split("d");
+    let num = split.next().unwrap().parse::<u8>().unwrap();
+    let sides = split.next().unwrap().parse::<u8>().unwrap();
+    let mut total = 0;
+    for i in 0..num {
+        let roll = rand::random::<u8>() % sides + 1;
+        total += roll;
+        println!("Roll {}: {}", i + 1, roll);
+    }
+    println!("Rolled d{} x{} times: {}", sides, num, total);
 }
 
 fn load_character_files() -> Vec<Character> {
@@ -316,28 +392,28 @@ fn create_character() -> Character {
             "1" => {
                 println!("Adding more information to the character sheet");
                 character = data_entry(character);
-                return character
+                return character;
             }
             "2" => input_taken = true,
             _ => println!("Invalid input"),
         }
     }
-    
+
     character
 }
 
 fn save_characters(characters: Vec<Character>) {
-
     fn save_character(name: String, data: Character, characters: &mut Vec<Character>) {
         println!("Saving character sheet for {}", name);
-    
+
         let path = format!("characters/{}.txt", name);
         let mut file = fs::File::create(path).expect("Failed to create file");
-        let serialized = ron::ser::to_string_pretty(&data, ron::ser::PrettyConfig::default()).unwrap();
-    
+        let serialized =
+            ron::ser::to_string_pretty(&data, ron::ser::PrettyConfig::default()).unwrap();
+
         file.write(serialized.as_bytes())
             .expect("Failed to write to file");
-    
+
         println!("Character sheet saved!");
     }
 
@@ -345,9 +421,6 @@ fn save_characters(characters: Vec<Character>) {
         save_character(character.name.clone(), character, &mut Vec::new());
     }
 }
-
-
-
 
 fn display_character_info() {
     println!("Enter the name of the character you would like to load:");
