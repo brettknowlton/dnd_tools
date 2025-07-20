@@ -225,7 +225,7 @@ impl Character {
         new_character
     }
 
-    fn apply_vec_changes(mut self, changes: Vec<String>) -> Character {
+    fn apply_vec_changes(self, changes: Vec<String>) -> Character {
         let mut new_character = self.clone();
         new_character.name = changes[0].clone();
         new_character.level = Some(changes[1].parse().unwrap());
@@ -253,6 +253,73 @@ struct Data {
     data: HashMap<char, Vec<String>>
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct InitiativeEntry {
+    name: String,
+    initiative: i32,
+    is_player: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct InitiativeTracker {
+    entries: Vec<InitiativeEntry>,
+    current_turn: usize,
+}
+
+impl InitiativeTracker {
+    fn new() -> Self {
+        InitiativeTracker {
+            entries: Vec::new(),
+            current_turn: 0,
+        }
+    }
+
+    fn add_entry(&mut self, name: String, initiative: i32, is_player: bool) {
+        let entry = InitiativeEntry {
+            name,
+            initiative,
+            is_player,
+        };
+        self.entries.push(entry);
+        self.sort_by_initiative();
+    }
+
+    fn sort_by_initiative(&mut self) {
+        self.entries.sort_by(|a, b| b.initiative.cmp(&a.initiative));
+        self.current_turn = 0;
+    }
+
+    fn next_turn(&mut self) -> Option<&InitiativeEntry> {
+        if self.entries.is_empty() {
+            return None;
+        }
+        let current = &self.entries[self.current_turn];
+        self.current_turn = (self.current_turn + 1) % self.entries.len();
+        Some(current)
+    }
+
+    fn display(&self) {
+        println!("Initiative Order:");
+        for (i, entry) in self.entries.iter().enumerate() {
+            let marker = if i == self.current_turn { ">>> " } else { "    " };
+            let player_type = if entry.is_player { "(Player)" } else { "(NPC)" };
+            println!("{}Initiative {}: {} {}", marker, entry.initiative, entry.name, player_type);
+        }
+    }
+
+    fn remove_entry(&mut self, name: &str) -> bool {
+        if let Some(pos) = self.entries.iter().position(|entry| entry.name == name) {
+            self.entries.remove(pos);
+            if self.current_turn >= self.entries.len() && !self.entries.is_empty() {
+                self.current_turn = 0;
+            }
+            true
+        } else {
+            false
+        }
+    }
+}
+
 fn main() -> io::Result<()> {
     println!("Welcome to DnD tools!");
     let mut characters = load_character_files();
@@ -261,7 +328,7 @@ fn main() -> io::Result<()> {
         println!("{:?}\n", character_sheet);
     }
 
-    let mut events = Data {
+    let events = Data {
         data: HashMap::new()
     };
 
@@ -272,6 +339,7 @@ fn main() -> io::Result<()> {
         println!("1. Create a new character");
         println!("2. Display character info");
         println!("3. Roll Dice");
+        println!("4. Initiative Tracker");
         println!("0. Exit");
         let mut buffer = String::new();
         io::stdin().read_line(&mut buffer)?;
@@ -282,7 +350,8 @@ fn main() -> io::Result<()> {
                 save_characters(characters.clone());
             }
             "2" => display_character_info(),
-            "3" => roll_dice_mode(events),
+            "3" => roll_dice_mode(events.clone()),
+            "4" => initiative_tracker_mode(),
             "0" => ending = true,
 
             _ => println!("Invalid input"),
@@ -291,11 +360,13 @@ fn main() -> io::Result<()> {
     Ok(())
 }
 
-fn roll_dice_mode(events: Data) {
+fn roll_dice_mode(_events: Data) {
     let mut ending = false;
     while !ending {
         println!("Options:");
         println!("r(i)d(n) will roll a n sided die i times");
+        println!("e - event management");
+        println!("q - quit");
         let mut buffer = String::new();
         io::stdin()
             .read_line(&mut buffer)
@@ -320,7 +391,7 @@ fn add_event(buffer: &mut str) {
 
     match buffer.trim().chars().next() {
         Some('a') => {
-            
+            println!("Event management - add functionality coming soon");
         }
         Some('r') => {
             remove_event_from_file(&mut buffer);
@@ -331,11 +402,101 @@ fn add_event(buffer: &mut str) {
         _ => println!("Invalid input"),
     }
 
+    if buffer.trim().is_empty() {
+        return;
+    }
+
     let mut split = buffer.split(" ");
-    let mut event = split.next().unwrap().to_string();
-    let mut time = split.next().unwrap().to_string();
-    let mut desc = split.next().unwrap().to_string();
-    println!("Event: {}\nTime: {}\nDescription: {}", event, time, desc);
+    if let (Some(event), Some(time), Some(desc)) = (split.next(), split.next(), split.next()) {
+        println!("Event: {}\nTime: {}\nDescription: {}", event, time, desc);
+    }
+}
+
+fn remove_event_from_file(_buffer: &mut String) {
+    println!("Remove event functionality coming soon");
+}
+
+fn load_events() {
+    println!("Load events functionality coming soon");
+}
+
+fn initiative_tracker_mode() {
+    let mut tracker = InitiativeTracker::new();
+    let mut ending = false;
+    
+    println!("Welcome to the Initiative Tracker!");
+    println!("Commands: add, remove, next, display, clear, quit");
+    
+    while !ending {
+        println!("\nInitiative Tracker > Enter command:");
+        let mut buffer = String::new();
+        io::stdin().read_line(&mut buffer).expect("Failed to read line");
+        
+        let input = buffer.trim().to_lowercase();
+        let parts: Vec<&str> = input.split_whitespace().collect();
+        
+        match parts.get(0) {
+            Some(&"add") => {
+                if parts.len() >= 3 {
+                    let name = parts[1].to_string();
+                    if let Ok(initiative) = parts[2].parse::<i32>() {
+                        let is_player = parts.get(3).map_or(true, |&s| s == "player");
+                        tracker.add_entry(name, initiative, is_player);
+                        println!("Added to initiative tracker!");
+                        tracker.display();
+                    } else {
+                        println!("Invalid initiative value. Please enter a number.");
+                    }
+                } else {
+                    println!("Usage: add <name> <initiative> [player|npc]");
+                    println!("Example: add Gandalf 18 player");
+                }
+            }
+            Some(&"remove") => {
+                if parts.len() >= 2 {
+                    let name = parts[1];
+                    if tracker.remove_entry(name) {
+                        println!("Removed {} from initiative tracker", name);
+                        tracker.display();
+                    } else {
+                        println!("Could not find {} in initiative tracker", name);
+                    }
+                } else {
+                    println!("Usage: remove <name>");
+                }
+            }
+            Some(&"next") => {
+                if let Some(current) = tracker.next_turn() {
+                    println!("Current turn: {} (Initiative: {})", current.name, current.initiative);
+                    tracker.display();
+                } else {
+                    println!("No entries in initiative tracker. Use 'add' to add some!");
+                }
+            }
+            Some(&"display") => {
+                tracker.display();
+            }
+            Some(&"clear") => {
+                tracker = InitiativeTracker::new();
+                println!("Initiative tracker cleared!");
+            }
+            Some(&"quit") | Some(&"q") => {
+                ending = true;
+            }
+            Some(&"help") | Some(&"h") => {
+                println!("Commands:");
+                println!("  add <name> <initiative> [player|npc] - Add entry to tracker");
+                println!("  remove <name> - Remove entry from tracker");
+                println!("  next - Advance to next turn");
+                println!("  display - Show current initiative order");
+                println!("  clear - Clear all entries");
+                println!("  quit - Exit initiative tracker");
+            }
+            _ => {
+                println!("Unknown command. Type 'help' for available commands.");
+            }
+        }
+    }
 }
 
 
@@ -403,7 +564,7 @@ fn create_character() -> Character {
 }
 
 fn save_characters(characters: Vec<Character>) {
-    fn save_character(name: String, data: Character, characters: &mut Vec<Character>) {
+    fn save_character(name: String, data: Character, _characters: &mut Vec<Character>) {
         println!("Saving character sheet for {}", name);
 
         let path = format!("characters/{}.txt", name);
@@ -445,7 +606,7 @@ fn data_entry(mut character: Character) -> Character {
     let mut changes = std::collections::HashMap::new();
     //loop over each item in data, show what the current value is, and ask for an overwrite value - blank entry means no change
     let mut index = 0;
-    for (item) in (data) {
+    for item in data {
         let stat = stats[index].clone();
         println!("{}: {}", stat, item);
         println!(
