@@ -1,0 +1,7 @@
+Name: Orc
+HP: 22/22
+AC: 13
+Initiative: 10
+Type: NPC
+Status Effects:
+  - Stunned
