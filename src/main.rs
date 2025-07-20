@@ -7,14 +7,16 @@ mod dice;
 mod input_handler;
 mod events;
 mod error_handling;
+mod combat;
 mod tests;
 
 use character::Character;
 use file_manager::{load_character_files, save_characters, display_single_character, display_all_characters, delete_character_menu};
 use initiative::initiative_tracker_mode;
-use dice::roll_dice_mode;
+use dice::{roll_dice_mode, roll_dice};
 use input_handler::create_character;
 use events::Data;
+use combat::{enhanced_initiative_setup, CombatTracker, StatusEffect};
 
 
 fn main() -> io::Result<()> {
@@ -185,29 +187,66 @@ fn roll_3d6() -> u8 {
 }
 
 fn combat_tracker_mode() {
-    println!("\n=== Combat Tracker ===");
-    println!("Starting with Initiative Tracker...");
+    println!("\n⚔️  Enhanced Combat Tracker ⚔️");
+    println!("Starting with Initiative setup...\n");
     
-    // First run the initiative tracker
-    initiative_tracker_mode();
+    // Set up initiative with enhanced features
+    let mut combat_tracker = enhanced_initiative_setup();
     
-    println!("\nWould you like to enter Combat Mode? (y/n)");
+    if combat_tracker.combatants.is_empty() {
+        println!("❌ No combatants added. Exiting combat tracker.");
+        return;
+    }
+    
+    combat_tracker.display_initiative_order();
+    
+    println!("\n🚀 Ready to begin combat? (y/n)");
     let mut buffer = String::new();
     if io::stdin().read_line(&mut buffer).is_err() {
         println!("Failed to read input. Exiting combat tracker.");
         return;
     }
     
-    if buffer.trim().to_lowercase() == "y" {
-        combat_mode();
+    if buffer.trim().to_lowercase() == "y" || buffer.trim().to_lowercase() == "yes" {
+        // Ask for current HP for all combatants
+        println!("\n💖 Please confirm current HP for all combatants:");
+        for combatant in &mut combat_tracker.combatants {
+            println!("Current HP for {} (max: {}): ", combatant.name, combatant.max_hp);
+            let mut hp_input = String::new();
+            if io::stdin().read_line(&mut hp_input).is_ok() {
+                if let Ok(hp) = hp_input.trim().parse::<i32>() {
+                    combatant.current_hp = hp;
+                    println!("✅ Set {}'s HP to {}", combatant.name, hp);
+                } else {
+                    println!("Invalid input, keeping current HP: {}", combatant.current_hp);
+                }
+            }
+        }
+        
+        enhanced_combat_mode(combat_tracker);
     }
 }
 
-fn combat_mode() {
-    println!("\n=== Combat Mode ===");
-    println!("Combat tracker functionality is not yet fully implemented.");
-    println!("Available commands: next, remove, quit");
-    println!("Note: Initiative 0 creatures will be skipped, HP 0 creatures still get turns.");
+fn enhanced_combat_mode(mut combat_tracker: CombatTracker) {
+    println!("\n⚔️  COMBAT MODE ACTIVATED ⚔️");
+    println!("═══════════════════════════════════════════════════════════");
+    println!("Available commands:");
+    println!("  📊 stats [name] - Show character stats");
+    println!("  ⚔️  attack <target> - Roll attack vs target's AC");
+    println!("  🎭 status [add|remove] [self|name] <status> - Manage status effects");
+    println!("  ➡️  next|continue - Advance to next combatant");
+    println!("  🗑️  remove <name> - Remove combatant from combat");
+    println!("  💾 save <npc_name> - Save NPC to npcs/ directory");
+    println!("  🔍 show - Display current initiative order");
+    println!("  ❓ help - Show this help");
+    println!("  🚪 quit - Exit combat mode");
+    println!("═══════════════════════════════════════════════════════════");
+    
+    // Start the first turn
+    if let Some(current_combatant) = combat_tracker.next_turn() {
+        println!("\n🎯 Starting combat with {}", current_combatant.name);
+        current_combatant.display_stats();
+    }
     
     loop {
         println!("\nCombat > Enter command:");
@@ -217,18 +256,164 @@ fn combat_mode() {
             continue;
         }
         
-        let input = buffer.trim().to_lowercase();
-        match input.as_str() {
-            "next" => println!("Next command - advancing to next combatant..."),
-            "remove" => println!("Remove command - removes combatant from loop (doesn't touch files)..."),
-            "quit" | "q" => break,
+        let input = buffer.trim();
+        let parts: Vec<&str> = input.split_whitespace().collect();
+        let command = parts.get(0).map(|s| s.to_lowercase()).unwrap_or_default();
+        
+        match command.as_str() {
+            "stats" => {
+                if let Some(name) = parts.get(1) {
+                    if let Some(combatant) = combat_tracker.get_combatant(name) {
+                        combatant.display_stats();
+                    } else {
+                        println!("❌ Combatant '{}' not found", name);
+                    }
+                } else {
+                    println!("Usage: stats <name>");
+                }
+            }
+            "attack" => {
+                if let Some(target_name) = parts.get(1) {
+                    handle_attack_command(&mut combat_tracker, target_name);
+                } else {
+                    println!("Usage: attack <target>");
+                }
+            }
+            "status" => {
+                handle_status_command(&mut combat_tracker, &parts[1..]);
+            }
+            "next" | "continue" => {
+                if let Some(next_combatant) = combat_tracker.next_turn() {
+                    println!("\n🎯 It's {}'s turn!", next_combatant.name);
+                    next_combatant.display_stats();
+                } else {
+                    println!("❌ No combatants available for turns");
+                }
+            }
+            "remove" => {
+                if let Some(name) = parts.get(1) {
+                    if combat_tracker.remove_combatant(name) {
+                        println!("✅ Removed {} from combat", name);
+                        combat_tracker.display_initiative_order();
+                    } else {
+                        println!("❌ Could not find {} in combat", name);
+                    }
+                } else {
+                    println!("Usage: remove <name>");
+                }
+            }
+            "save" => {
+                if let Some(npc_name) = parts.get(1) {
+                    if let Err(e) = combat_tracker.save_npc(npc_name) {
+                        println!("❌ Failed to save NPC: {}", e);
+                    }
+                } else {
+                    println!("Usage: save <npc_name>");
+                }
+            }
+            "show" => {
+                combat_tracker.display_initiative_order();
+            }
+            "quit" | "q" => {
+                println!("💀 Exiting combat mode...");
+                break;
+            }
             "help" | "h" => {
                 println!("Combat Mode Commands:");
-                println!("  next - Advance to next player in initiative order");
-                println!("  remove - Remove combatant from combat loop");
+                println!("  stats [name] - Show character stats");
+                println!("  attack <target> - Roll d20 attack vs target's AC");
+                println!("  status [add|remove] [self|name] <status> - Manage status effects");
+                println!("  next|continue - Advance to next combatant");
+                println!("  remove <name> - Remove combatant from combat loop");
+                println!("  save <npc_name> - Save NPC stats to npcs/ directory");
+                println!("  show - Display current initiative order");
                 println!("  quit - Exit combat mode");
             }
-            _ => println!("Unknown command. Type 'help' for available commands."),
+            _ => {
+                println!("❌ Unknown command '{}'. Type 'help' for available commands.", 
+                         parts.get(0).unwrap_or(&""));
+            }
+        }
+    }
+}
+
+fn handle_attack_command(combat_tracker: &mut CombatTracker, target_name: &str) {
+    if let Some(target) = combat_tracker.get_combatant(target_name) {
+        let target_ac = target.ac;
+        
+        // Roll d20 for attack
+        match roll_dice("1d20") {
+            Ok((rolls, total)) => {
+                let attack_roll = rolls[0] as i32;
+                let hit = attack_roll >= target_ac;
+                
+                println!("\n⚔️  Attack Roll: {} (d20: {})", total, attack_roll);
+                println!("🎯 Target AC: {}", target_ac);
+                
+                if hit {
+                    println!("💥 HIT! The attack connects!");
+                    println!("🎲 Roll damage dice now (use dice mode or enter manually)");
+                } else {
+                    println!("🛡️  MISS! The attack fails to connect.");
+                }
+            }
+            Err(e) => println!("❌ Error rolling attack: {}", e),
+        }
+    } else {
+        println!("❌ Target '{}' not found in combat", target_name);
+    }
+}
+
+fn handle_status_command(combat_tracker: &mut CombatTracker, args: &[&str]) {
+    if args.len() < 3 {
+        println!("Usage: status [add|remove] [self|name] <status_name>");
+        return;
+    }
+    
+    let action = args[0].to_lowercase();
+    let target = args[1];
+    let status_name = args[2..].join(" ");
+    
+    // For now, we'll determine "self" based on current turn
+    let target_name = if target.to_lowercase() == "self" {
+        // Get current combatant name
+        if let Some(current) = combat_tracker.combatants.get(combat_tracker.current_turn) {
+            current.name.clone()
+        } else {
+            println!("❌ Cannot determine current combatant for 'self'");
+            return;
+        }
+    } else {
+        target.to_string()
+    };
+    
+    match action.as_str() {
+        "add" => {
+            if let Some(combatant) = combat_tracker.get_combatant_mut(&target_name) {
+                let status = StatusEffect {
+                    name: status_name.clone(),
+                    description: None,
+                    duration: None, // Could be enhanced to ask for duration
+                };
+                combatant.add_status(status);
+                println!("✅ Added status '{}' to {}", status_name, target_name);
+            } else {
+                println!("❌ Combatant '{}' not found", target_name);
+            }
+        }
+        "remove" => {
+            if let Some(combatant) = combat_tracker.get_combatant_mut(&target_name) {
+                if combatant.remove_status(&status_name) {
+                    println!("✅ Removed status '{}' from {}", status_name, target_name);
+                } else {
+                    println!("❌ Status '{}' not found on {}", status_name, target_name);
+                }
+            } else {
+                println!("❌ Combatant '{}' not found", target_name);
+            }
+        }
+        _ => {
+            println!("❌ Invalid action '{}'. Use 'add' or 'remove'", action);
         }
     }
 }
