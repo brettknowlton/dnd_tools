@@ -62,3 +62,85 @@ pub fn display_character_info() {
         println!("Failed to read input");
     }
 }
+
+pub fn display_single_character(characters: &[Character]) {
+    if characters.is_empty() {
+        println!("No characters available.");
+        return;
+    }
+    
+    println!("\nSelect a character:");
+    for (i, character) in characters.iter().enumerate() {
+        println!("{}. {}", i + 1, character.name);
+    }
+    
+    let mut buffer = String::new();
+    if std::io::stdin().read_line(&mut buffer).is_ok() {
+        if let Ok(choice) = buffer.trim().parse::<usize>() {
+            if choice > 0 && choice <= characters.len() {
+                let character = &characters[choice - 1];
+                println!("\n=== Character Sheet ===");
+                for stat in character.get_ordered_stats() {
+                    println!("{}", stat);
+                }
+            } else {
+                println!("Invalid selection.");
+            }
+        } else {
+            println!("Invalid input. Please enter a number.");
+        }
+    } else {
+        println!("Failed to read input");
+    }
+}
+
+pub fn display_all_characters(characters: &[Character]) {
+    if characters.is_empty() {
+        println!("No characters available.");
+        return;
+    }
+    
+    println!("\n=== All Characters ===");
+    for (i, character) in characters.iter().enumerate() {
+        println!("\n--- Character {} ---", i + 1);
+        for stat in character.get_ordered_stats() {
+            println!("{}", stat);
+        }
+    }
+}
+
+pub fn delete_character_menu(characters: &mut Vec<Character>) {
+    if characters.is_empty() {
+        println!("No characters available to delete.");
+        return;
+    }
+    
+    println!("\nSelect a character to delete:");
+    for (i, character) in characters.iter().enumerate() {
+        println!("{}. {}", i + 1, character.name);
+    }
+    
+    let mut buffer = String::new();
+    if std::io::stdin().read_line(&mut buffer).is_ok() {
+        if let Ok(choice) = buffer.trim().parse::<usize>() {
+            if choice > 0 && choice <= characters.len() {
+                let character = characters.remove(choice - 1);
+                
+                // Delete the character file
+                let path = format!("characters/{}.txt", character.name);
+                if let Err(e) = fs::remove_file(&path) {
+                    println!("Warning: Could not delete character file {}: {}", path, e);
+                }
+                
+                println!("Character '{}' deleted successfully.", character.name);
+                save_characters(characters.clone());
+            } else {
+                println!("Invalid selection.");
+            }
+        } else {
+            println!("Invalid input. Please enter a number.");
+        }
+    } else {
+        println!("Failed to read input");
+    }
+}
