@@ -234,12 +234,13 @@ fn enhanced_combat_mode(mut combat_tracker: CombatTracker) {
     println!("  📊 stats [name] - Show character stats");
     println!("  ⚔️  attack <target> - Roll attack vs target's AC");
     println!("  🎭 status [add|remove] [self|name] <status> - Manage status effects");
+    println!("  🎲 save [ability] [self|name] - Make saving throw (e.g., save wis Gandalf)");
     println!("  ➡️  next|continue - Advance to next combatant");
     println!("  🗑️  remove <name> - Remove combatant from combat");
     println!("  💾 save <npc_name> - Save NPC to npcs/ directory");
     println!("  🔍 show - Display current initiative order");
     println!("  ❓ help - Show this help");
-    println!("  🚪 quit - Exit combat mode");
+    println!("  🚪 quit - Exit combat mode (auto-saves characters)");
     println!("═══════════════════════════════════════════════════════════");
     
     // Start the first turn
@@ -303,12 +304,49 @@ fn enhanced_combat_mode(mut combat_tracker: CombatTracker) {
                 }
             }
             "save" => {
-                if let Some(npc_name) = parts.get(1) {
-                    if let Err(e) = combat_tracker.save_npc(npc_name) {
-                        println!("❌ Failed to save NPC: {}", e);
+                if parts.len() >= 2 {
+                    // Check if this is a saving throw or NPC save
+                    let potential_ability = parts[1].to_lowercase();
+                    if ["str", "dex", "con", "wis", "int", "cha", "strength", "dexterity", "constitution", "wisdom", "intelligence", "charisma"].contains(&potential_ability.as_str()) {
+                        // This is a saving throw command
+                        let ability = parts[1];
+                        let target_name = if parts.len() >= 3 {
+                            parts[2].to_string()
+                        } else {
+                            // Default to current player
+                            if let Some(current) = combat_tracker.combatants.get(combat_tracker.current_turn) {
+                                current.name.clone()
+                            } else {
+                                println!("❌ No current combatant for saving throw");
+                                continue;
+                            }
+                        };
+                        
+                        let actual_target = if target_name.to_lowercase() == "self" {
+                            if let Some(current) = combat_tracker.combatants.get(combat_tracker.current_turn) {
+                                current.name.clone()
+                            } else {
+                                println!("❌ Cannot determine current combatant for 'self'");
+                                continue;
+                            }
+                        } else {
+                            target_name
+                        };
+                        
+                        match combat_tracker.make_saving_throw(&actual_target, ability) {
+                            Ok(result) => println!("{}", result),
+                            Err(e) => println!("❌ {}", e),
+                        }
+                    } else {
+                        // This is an NPC save command
+                        let npc_name = parts[1];
+                        if let Err(e) = combat_tracker.save_npc(npc_name) {
+                            println!("❌ Failed to save NPC: {}", e);
+                        }
                     }
                 } else {
-                    println!("Usage: save <npc_name>");
+                    println!("Usage: save [ability] [self|name] for saving throws, or save <npc_name> for NPC saving");
+                    println!("Examples: save wis Gandalf, save dex self, save Orc");
                 }
             }
             "show" => {
@@ -316,6 +354,7 @@ fn enhanced_combat_mode(mut combat_tracker: CombatTracker) {
             }
             "quit" | "q" => {
                 println!("💀 Exiting combat mode...");
+                combat_tracker.save_characters_on_exit();
                 break;
             }
             "help" | "h" => {
@@ -323,11 +362,12 @@ fn enhanced_combat_mode(mut combat_tracker: CombatTracker) {
                 println!("  stats [name] - Show character stats");
                 println!("  attack <target> - Roll d20 attack vs target's AC");
                 println!("  status [add|remove] [self|name] <status> - Manage status effects");
+                println!("  save [ability] [self|name] - Make saving throw (e.g., save wis Gandalf)");
+                println!("  save <npc_name> - Save NPC stats to npcs/ directory");
                 println!("  next|continue - Advance to next combatant");
                 println!("  remove <name> - Remove combatant from combat loop");
-                println!("  save <npc_name> - Save NPC stats to npcs/ directory");
                 println!("  show - Display current initiative order");
-                println!("  quit - Exit combat mode");
+                println!("  quit - Exit combat mode (auto-saves player characters)");
             }
             _ => {
                 println!("❌ Unknown command '{}'. Type 'help' for available commands.", 
@@ -352,7 +392,35 @@ fn handle_attack_command(combat_tracker: &mut CombatTracker, target_name: &str) 
                 
                 if hit {
                     println!("💥 HIT! The attack connects!");
-                    println!("🎲 Roll damage dice now (use dice mode or enter manually)");
+                    println!("🎲 Enter damage amount (or type 'roll' to use dice mode):");
+                    
+                    let mut damage_input = String::new();
+                    if std::io::stdin().read_line(&mut damage_input).is_ok() {
+                        let damage_input = damage_input.trim();
+                        
+                        if damage_input.to_lowercase() == "roll" {
+                            println!("💡 Use the dice mode in another terminal or enter damage manually.");
+                            println!("Enter damage amount:");
+                            let mut manual_damage = String::new();
+                            if std::io::stdin().read_line(&mut manual_damage).is_ok() {
+                                if let Ok(damage) = manual_damage.trim().parse::<i32>() {
+                                    match combat_tracker.apply_damage(target_name, damage) {
+                                        Ok(result) => println!("{}", result),
+                                        Err(e) => println!("❌ {}", e),
+                                    }
+                                } else {
+                                    println!("❌ Invalid damage amount");
+                                }
+                            }
+                        } else if let Ok(damage) = damage_input.parse::<i32>() {
+                            match combat_tracker.apply_damage(target_name, damage) {
+                                Ok(result) => println!("{}", result),
+                                Err(e) => println!("❌ {}", e),
+                            }
+                        } else {
+                            println!("❌ Invalid damage amount");
+                        }
+                    }
                 } else {
                     println!("🛡️  MISS! The attack fails to connect.");
                 }
