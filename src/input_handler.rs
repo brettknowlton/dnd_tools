@@ -77,7 +77,17 @@ pub fn data_entry(mut character: Character) -> Character {
                 if !new_value.is_empty() {
                     // Extract the key from the stat string (everything before the colon)
                     if let Some(colon_pos) = stat.find(':') {
-                        let key = stat[..colon_pos].to_lowercase().replace(' ', "_");
+                        let key = match stat[..colon_pos].to_lowercase().replace(' ', "_").as_str() {
+                            "intelligence" => "intl",
+                            "wisdom" => "wisd", 
+                            "charisma" => "chas",
+                            "strength" => "stre",
+                            "dexterity" => "dext",
+                            "constitution" => "cons",
+                            "passive_perception" => "passive_perception",
+                            "proficiency_bonus" => "prof_bonus",
+                            other => other,
+                        }.to_string();
                         
                         // Validate numeric inputs
                         let is_valid = match key.as_str() {
@@ -85,10 +95,10 @@ pub fn data_entry(mut character: Character) -> Character {
                             "ac" => validate_numeric_input(&new_value, &key, Some(1), Some(30)).is_ok(),
                             "hp" | "max_hp" | "temp_hp" => validate_numeric_input(&new_value, &key, Some(0), Some(255)).is_ok(),
                             "speed" => validate_numeric_input(&new_value, &key, Some(0), Some(100)).is_ok(),
-                            "intelligence" | "wisdom" | "charisma" | "strength" | "dexterity" | "constitution" => {
+                            "intl" | "wisd" | "chas" | "stre" | "dext" | "cons" => {
                                 validate_numeric_input(&new_value, &key, Some(1), Some(30)).is_ok()
                             }
-                            "passive_perception" | "initiative" | "proficiency_bonus" => {
+                            "passive_perception" | "initiative" | "prof_bonus" => {
                                 validate_numeric_input(&new_value, &key, Some(0), Some(50)).is_ok()
                             }
                             _ => true, // Non-numeric fields like name and description

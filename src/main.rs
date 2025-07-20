@@ -170,6 +170,7 @@ fn npc_randomizer_mode() {
     println!("INT: {}", intelligence);
     println!("WIS: {}", wisdom);
     println!("CHA: {}", charisma);
+    println!("\n(Note: passive_perception and cards array excluded as requested)");
     
     println!("\nPress Enter to continue...");
     let mut _buffer = String::new();
