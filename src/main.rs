@@ -9,6 +9,7 @@ mod events;
 mod error_handling;
 mod combat;
 mod tests;
+mod races_classes;
 
 fn clear_console() {
     print!("\x1B[2J\x1B[1;1H");
@@ -18,10 +19,10 @@ fn clear_console() {
 use character::Character;
 use file_manager::{load_character_files, save_characters, display_single_character, display_all_characters, delete_character_menu};
 use initiative::initiative_tracker_mode;
-use dice::{roll_dice_mode, roll_dice};
+use dice::{roll_dice_mode};
 use input_handler::create_character;
 use events::Data;
-use combat::{enhanced_initiative_setup, CombatTracker, StatusEffect};
+use combat::{enhanced_initiative_setup, CombatTracker, StatusEffect, Combatant};
 
 
 fn main() -> io::Result<()> {
@@ -148,17 +149,47 @@ fn exit_menu() -> bool {
 
 
 fn npc_randomizer_mode() {
-    println!("\n=== NPC Randomizer ===");
-    println!("Generating random NPC...");
+    println!("\n=== NPC Generator ===");
     
+    // Ask for manual or generated stats
+    println!("Would you like to:");
+    println!("1. Generate all stats randomly");
+    println!("2. Enter stats manually");
+    println!("3. Generate with custom race/class");
+    
+    let mut buffer = String::new();
+    if io::stdin().read_line(&mut buffer).is_err() {
+        println!("Failed to read input, defaulting to random generation");
+        generate_random_npc();
+        return;
+    }
+    
+    match buffer.trim() {
+        "1" => generate_random_npc(),
+        "2" => generate_manual_npc(), 
+        "3" => generate_custom_npc(),
+        _ => {
+            println!("Invalid choice, defaulting to random generation");
+            generate_random_npc();
+        }
+    }
+}
+
+fn generate_random_npc() {
+    use crate::races_classes::{get_random_race, get_random_class};
+    
+    println!("\n=== Generating Random NPC ===");
+    
+    // Generate race and class
+    let race = get_random_race();
+    let class = get_random_class();
     
     // Generate basic stats
     let ac = (rand::random::<u8>() % 11) + 10; // 10-20
     let hp = (rand::random::<u8>() % 41) + 10; // 10-50
     let speed = ((rand::random::<u8>() % 7) + 2) * 10; // 20-80 in increments of 10
     
-    // Generate ability scores using normal distribution approximation
-    // Using 3d6 for each stat (normal distribution around 10.5, range 3-18)
+    // Generate ability scores using 3d6 for each stat
     let strength = roll_3d6();
     let dexterity = roll_3d6();
     let constitution = roll_3d6();
@@ -166,22 +197,281 @@ fn npc_randomizer_mode() {
     let wisdom = roll_3d6();
     let charisma = roll_3d6();
     
-    println!("\n=== Generated NPC ===");
-    println!("Name: [Not generated]");
-    println!("AC: {}", ac);
-    println!("HP: {}", hp);
-    println!("Speed: {} feet", speed);
-    println!("STR: {}", strength);
-    println!("DEX: {}", dexterity);
-    println!("CON: {}", constitution);
-    println!("INT: {}", intelligence);
-    println!("WIS: {}", wisdom);
-    println!("CHA: {}", charisma);
-    println!("\n(Note: passive_perception and cards array excluded as requested)");
+    println!("\n╔═══════════════════════════════════════╗");
+    println!("║            Generated NPC              ║");
+    println!("╠═══════════════════════════════════════╣");
+    println!("║ Race: {:<31} ║", race);
+    println!("║ Class: {:<30} ║", class);
+    println!("║ AC: {:<33} ║", ac);
+    println!("║ HP: {:<33} ║", hp);
+    println!("║ Speed: {} feet{:<21} ║", speed, "");
+    println!("║                                       ║");
+    println!("║ Ability Scores:                       ║");
+    println!("║   STR: {:<29} ║", strength);
+    println!("║   DEX: {:<29} ║", dexterity);
+    println!("║   CON: {:<29} ║", constitution);
+    println!("║   INT: {:<29} ║", intelligence);
+    println!("║   WIS: {:<29} ║", wisdom);
+    println!("║   CHA: {:<29} ║", charisma);
+    println!("╚═══════════════════════════════════════╝");
+    
+    // Ask if they want to save this NPC
+    println!("\nSave this NPC? (y/n): ");
+    let mut save_input = String::new();
+    if io::stdin().read_line(&mut save_input).is_ok() && save_input.trim().to_lowercase() == "y" {
+        save_generated_npc(&race, &class, ac, hp, speed, strength, dexterity, constitution, intelligence, wisdom, charisma);
+    }
     
     println!("\nPress Enter to continue...");
     let mut _buffer = String::new();
     let _ = io::stdin().read_line(&mut _buffer);
+}
+
+fn generate_manual_npc() {
+    use crate::races_classes::{list_races, list_classes};
+    
+    println!("\n=== Manual NPC Creation ===");
+    
+    // Get name
+    println!("NPC Name: ");
+    let mut name = String::new();
+    if io::stdin().read_line(&mut name).is_err() {
+        println!("Failed to read name, using default");
+        name = "Unknown NPC".to_string();
+    }
+    let name = name.trim().to_string();
+    
+    // Show race options
+    let races = list_races();
+    println!("\nAvailable Races:");
+    for (i, race) in races.iter().enumerate() {
+        print!("{:<12} ", race);
+        if (i + 1) % 6 == 0 { println!(); }
+    }
+    println!("\nRace (or press Enter for random): ");
+    let mut race_input = String::new();
+    let race = if io::stdin().read_line(&mut race_input).is_ok() {
+        let input = race_input.trim();
+        if input.is_empty() {
+            crate::races_classes::get_random_race()
+        } else {
+            input.to_string()
+        }
+    } else {
+        crate::races_classes::get_random_race()
+    };
+    
+    // Show class options  
+    let classes = list_classes();
+    println!("\nAvailable Classes:");
+    for (i, class) in classes.iter().enumerate() {
+        print!("{:<12} ", class);
+        if (i + 1) % 4 == 0 { println!(); }
+    }
+    println!("\nClass (or press Enter for random): ");
+    let mut class_input = String::new();
+    let class = if io::stdin().read_line(&mut class_input).is_ok() {
+        let input = class_input.trim();
+        if input.is_empty() {
+            crate::races_classes::get_random_class()
+        } else {
+            input.to_string()
+        }
+    } else {
+        crate::races_classes::get_random_class()
+    };
+    
+    // Get other stats manually
+    let ac = prompt_for_number("AC (10-25)", 10, 25).unwrap_or(12);
+    let hp = prompt_for_number("HP (1-200)", 1, 200).unwrap_or(20);
+    let speed = prompt_for_number("Speed (10-120)", 10, 120).unwrap_or(30);
+    
+    println!("\nAbility Scores (3-18, or press Enter to roll 3d6):");
+    let strength = prompt_for_ability_score("Strength").unwrap_or_else(|| roll_3d6());
+    let dexterity = prompt_for_ability_score("Dexterity").unwrap_or_else(|| roll_3d6());
+    let constitution = prompt_for_ability_score("Constitution").unwrap_or_else(|| roll_3d6());
+    let intelligence = prompt_for_ability_score("Intelligence").unwrap_or_else(|| roll_3d6());
+    let wisdom = prompt_for_ability_score("Wisdom").unwrap_or_else(|| roll_3d6());
+    let charisma = prompt_for_ability_score("Charisma").unwrap_or_else(|| roll_3d6());
+    
+    // Display the created NPC
+    println!("\n╔═══════════════════════════════════════╗");
+    println!("║            Created NPC                ║");
+    println!("╠═══════════════════════════════════════╣");
+    println!("║ Name: {:<31} ║", name);
+    println!("║ Race: {:<31} ║", race);
+    println!("║ Class: {:<30} ║", class);
+    println!("║ AC: {:<33} ║", ac);
+    println!("║ HP: {:<33} ║", hp);
+    println!("║ Speed: {} feet{:<21} ║", speed, "");
+    println!("║                                       ║");
+    println!("║ Ability Scores:                       ║");
+    println!("║   STR: {:<29} ║", strength);
+    println!("║   DEX: {:<29} ║", dexterity);
+    println!("║   CON: {:<29} ║", constitution);
+    println!("║   INT: {:<29} ║", intelligence);
+    println!("║   WIS: {:<29} ║", wisdom);
+    println!("║   CHA: {:<29} ║", charisma);
+    println!("╚═══════════════════════════════════════╝");
+    
+    // Save the NPC
+    save_generated_npc(&race, &class, ac, hp, speed, strength, dexterity, constitution, intelligence, wisdom, charisma);
+    
+    println!("\nPress Enter to continue...");
+    let mut _buffer = String::new();
+    let _ = io::stdin().read_line(&mut _buffer);
+}
+
+fn generate_custom_npc() {
+    use crate::races_classes::{list_races, list_classes};
+    
+    println!("\n=== Custom NPC Generation ===");
+    
+    // Get race selection
+    let races = list_races();
+    println!("Available Races:");
+    for (i, race) in races.iter().enumerate() {
+        print!("{:<12} ", race);
+        if (i + 1) % 6 == 0 { println!(); }
+    }
+    println!("\nSelect race (or press Enter for random): ");
+    let mut race_input = String::new();
+    let race = if io::stdin().read_line(&mut race_input).is_ok() {
+        let input = race_input.trim();
+        if input.is_empty() {
+            crate::races_classes::get_random_race()
+        } else {
+            input.to_string()
+        }
+    } else {
+        crate::races_classes::get_random_race()
+    };
+    
+    // Get class selection
+    let classes = list_classes();
+    println!("\nAvailable Classes:");
+    for (i, class) in classes.iter().enumerate() {
+        print!("{:<12} ", class);
+        if (i + 1) % 4 == 0 { println!(); }
+    }
+    println!("\nSelect class (or press Enter for random): ");
+    let mut class_input = String::new();
+    let class = if io::stdin().read_line(&mut class_input).is_ok() {
+        let input = class_input.trim();
+        if input.is_empty() {
+            crate::races_classes::get_random_class()
+        } else {
+            input.to_string()
+        }
+    } else {
+        crate::races_classes::get_random_class()
+    };
+    
+    // Generate other stats randomly
+    let ac = (rand::random::<u8>() % 11) + 10;
+    let hp = (rand::random::<u8>() % 41) + 10;
+    let speed = ((rand::random::<u8>() % 7) + 2) * 10;
+    
+    let strength = roll_3d6();
+    let dexterity = roll_3d6();
+    let constitution = roll_3d6();
+    let intelligence = roll_3d6();
+    let wisdom = roll_3d6();
+    let charisma = roll_3d6();
+    
+    println!("\n╔═══════════════════════════════════════╗");
+    println!("║       Custom Generated NPC            ║");
+    println!("╠═══════════════════════════════════════╣");
+    println!("║ Race: {:<31} ║", race);
+    println!("║ Class: {:<30} ║", class);
+    println!("║ AC: {:<33} ║", ac);
+    println!("║ HP: {:<33} ║", hp);
+    println!("║ Speed: {} feet{:<21} ║", speed, "");
+    println!("║                                       ║");
+    println!("║ Ability Scores:                       ║");
+    println!("║   STR: {:<29} ║", strength);
+    println!("║   DEX: {:<29} ║", dexterity);
+    println!("║   CON: {:<29} ║", constitution);
+    println!("║   INT: {:<29} ║", intelligence);
+    println!("║   WIS: {:<29} ║", wisdom);
+    println!("║   CHA: {:<29} ║", charisma);
+    println!("╚═══════════════════════════════════════╝");
+    
+    // Ask if they want to save this NPC
+    println!("\nSave this NPC? (y/n): ");
+    let mut save_input = String::new();
+    if io::stdin().read_line(&mut save_input).is_ok() && save_input.trim().to_lowercase() == "y" {
+        save_generated_npc(&race, &class, ac, hp, speed, strength, dexterity, constitution, intelligence, wisdom, charisma);
+    }
+    
+    println!("\nPress Enter to continue...");
+    let mut _buffer = String::new();
+    let _ = io::stdin().read_line(&mut _buffer);
+}
+
+fn prompt_for_number(prompt: &str, min: u8, max: u8) -> Option<u8> {
+    println!("{} ({}-{}): ", prompt, min, max);
+    let mut input = String::new();
+    if io::stdin().read_line(&mut input).is_ok() {
+        if let Ok(num) = input.trim().parse::<u8>() {
+            if num >= min && num <= max {
+                return Some(num);
+            }
+        }
+    }
+    None
+}
+
+fn prompt_for_ability_score(ability: &str) -> Option<u8> {
+    println!("{} (3-18, or Enter to roll 3d6): ", ability);
+    let mut input = String::new();
+    if io::stdin().read_line(&mut input).is_ok() {
+        let trimmed = input.trim();
+        if trimmed.is_empty() {
+            return None; // Will trigger random roll
+        }
+        if let Ok(score) = trimmed.parse::<u8>() {
+            if score >= 3 && score <= 18 {
+                return Some(score);
+            }
+        }
+    }
+    None
+}
+
+fn save_generated_npc(race: &str, class: &str, ac: u8, hp: u8, speed: u8, str: u8, dex: u8, con: u8, int: u8, wis: u8, cha: u8) {
+    use std::fs;
+    
+    println!("Enter NPC name to save: ");
+    let mut name_input = String::new();
+    if io::stdin().read_line(&mut name_input).is_err() {
+        println!("Failed to read name, not saving");
+        return;
+    }
+    
+    let name = name_input.trim();
+    if name.is_empty() {
+        println!("No name provided, not saving");
+        return;
+    }
+    
+    // Create npcs directory if it doesn't exist
+    if let Err(e) = fs::create_dir_all("npcs") {
+        println!("Failed to create npcs directory: {}", e);
+        return;
+    }
+    
+    let path = format!("npcs/{}.txt", name);
+    
+    let npc_data = format!(
+        "Name: {}\nRace: {}\nClass: {}\nAC: {}\nHP: {}\nSpeed: {}\nSTR: {}\nDEX: {}\nCON: {}\nINT: {}\nWIS: {}\nCHA: {}",
+        name, race, class, ac, hp, speed, str, dex, con, int, wis, cha
+    );
+    
+    match fs::write(&path, npc_data) {
+        Ok(_) => println!("✅ Saved NPC '{}' to {}", name, path),
+        Err(e) => println!("❌ Failed to save NPC: {}", e),
+    }
 }
 
 fn roll_3d6() -> u8 {
@@ -238,12 +528,14 @@ fn enhanced_combat_mode(mut combat_tracker: CombatTracker) {
     println!("Available commands:");
     println!("  📊 stats [name] - Show character stats");
     println!("  ⚔️  attack <target> - Roll attack vs target's AC");
-    println!("  🎭 status [add|remove] [self|name] <status> - Manage status effects");
+    println!("  🎭 status [add|remove|list] [self|name] <status> - Manage status effects");
     println!("  🎲 save [ability] [self|name] - Make saving throw (e.g., save wis Gandalf)");
     println!("  ➡️  next|continue - Advance to next combatant");
+    println!("  ⬅️  back - Go back to previous combatant's turn");
+    println!("  ➕ insert <name> - Add new combatant mid-fight");
     println!("  🗑️  remove <name> - Remove combatant from combat");
     println!("  💾 save <npc_name> - Save NPC to npcs/ directory");
-    println!("  🔍 show - Display current initiative order");
+    println!("  🔍 show|list - Display current initiative order");
     println!("  ❓ help - Show this help");
     println!("  🚪 quit - Exit combat mode (auto-saves characters)");
     println!("═══════════════════════════════════════════════════════════");
@@ -295,6 +587,24 @@ fn enhanced_combat_mode(mut combat_tracker: CombatTracker) {
                     next_combatant.display_stats();
                 } else {
                     println!("❌ No combatants available for turns");
+                }
+            }
+            "back" => {
+                if combat_tracker.previous_turn() {
+                    clear_console();
+                    if let Some(prev_combatant) = combat_tracker.get_current_combatant() {
+                        println!("\n⬅️  Going back to {}'s turn!", prev_combatant.name);
+                        prev_combatant.display_stats();
+                    }
+                } else {
+                    println!("❌ Cannot go back further");
+                }
+            }
+            "insert" => {
+                if let Some(name) = parts.get(1) {
+                    handle_insert_combatant(&mut combat_tracker, name);
+                } else {
+                    println!("Usage: insert <combatant_name>");
                 }
             }
             "remove" => {
@@ -355,7 +665,7 @@ fn enhanced_combat_mode(mut combat_tracker: CombatTracker) {
                     println!("Examples: save wis Gandalf, save dex self, save Orc");
                 }
             }
-            "show" => {
+            "show" | "list" => {
                 combat_tracker.display_initiative_order();
             }
             "quit" | "q" => {
@@ -367,12 +677,14 @@ fn enhanced_combat_mode(mut combat_tracker: CombatTracker) {
                 println!("Combat Mode Commands:");
                 println!("  stats [name] - Show character stats");
                 println!("  attack <target> - Roll d20 attack vs target's AC");
-                println!("  status [add|remove] [self|name] <status> - Manage status effects");
+                println!("  status [add|remove|list] [self|name] <status> - Manage status effects");
                 println!("  save [ability] [self|name] - Make saving throw (e.g., save wis Gandalf)");
                 println!("  save <npc_name> - Save NPC stats to npcs/ directory");
                 println!("  next|continue - Advance to next combatant");
+                println!("  back - Go back to previous combatant's turn");
+                println!("  insert <name> - Add new combatant mid-fight");
                 println!("  remove <name> - Remove combatant from combat loop");
-                println!("  show - Display current initiative order");
+                println!("  show|list - Display current initiative order");
                 println!("  quit - Exit combat mode (auto-saves player characters)");
             }
             _ => {
@@ -387,13 +699,19 @@ fn handle_attack_command(combat_tracker: &mut CombatTracker, target_name: &str) 
     if let Some(target) = combat_tracker.get_combatant(target_name) {
         let target_ac = target.ac;
         
-        // Roll d20 for attack
-        match roll_dice("1d20") {
-            Ok((rolls, total)) => {
+        // Roll d20 for attack with critical announcements
+        match dice::roll_dice_with_crits("1d20") {
+            Ok((rolls, total, crit_message)) => {
                 let attack_roll = rolls[0] as i32;
                 let hit = attack_roll >= target_ac;
                 
                 println!("\n⚔️  Attack Roll: {} (d20: {})", total, attack_roll);
+                
+                // Display critical message if applicable
+                if let Some(message) = crit_message {
+                    println!("{}", message);
+                }
+                
                 println!("🎯 Target AC: {}", target_ac);
                 
                 if hit {
@@ -439,12 +757,63 @@ fn handle_attack_command(combat_tracker: &mut CombatTracker, target_name: &str) 
 }
 
 fn handle_status_command(combat_tracker: &mut CombatTracker, args: &[&str]) {
+    if args.is_empty() {
+        println!("Usage: status [add|remove|list] [self|name] <status_name>");
+        return;
+    }
+    
+    let action = args[0].to_lowercase();
+    
+    // Handle status list command
+    if action == "list" {
+        if args.len() >= 2 {
+            let target = args[1];
+            let target_name = if target.to_lowercase() == "self" {
+                if let Some(current) = combat_tracker.combatants.get(combat_tracker.current_turn) {
+                    current.name.clone()
+                } else {
+                    println!("❌ Cannot determine current combatant for 'self'");
+                    return;
+                }
+            } else {
+                target.to_string()
+            };
+            
+            if let Some(combatant) = combat_tracker.get_combatant(&target_name) {
+                if combatant.status_effects.is_empty() {
+                    println!("📋 {} has no status effects", target_name);
+                } else {
+                    println!("📋 Status effects for {}:", target_name);
+                    for status in &combatant.status_effects {
+                        let duration_str = match status.duration {
+                            Some(d) => format!(" ({} rounds remaining)", d),
+                            None => " (permanent)".to_string(),
+                        };
+                        println!("  • {}{}", status.name, duration_str);
+                    }
+                }
+            } else {
+                println!("❌ Combatant '{}' not found", target_name);
+            }
+        } else {
+            // List status effects for all combatants
+            println!("📋 Status Effects Summary:");
+            for combatant in &combat_tracker.combatants {
+                if !combatant.status_effects.is_empty() {
+                    println!("  {}: {}", combatant.name, 
+                        combatant.status_effects.iter()
+                            .map(|s| s.name.as_str()).collect::<Vec<_>>().join(", "));
+                }
+            }
+        }
+        return;
+    }
+    
     if args.len() < 3 {
         println!("Usage: status [add|remove] [self|name] <status_name>");
         return;
     }
     
-    let action = args[0].to_lowercase();
     let target = args[1];
     let status_name = args[2..].join(" ");
     
@@ -487,7 +856,81 @@ fn handle_status_command(combat_tracker: &mut CombatTracker, args: &[&str]) {
             }
         }
         _ => {
-            println!("❌ Invalid action '{}'. Use 'add' or 'remove'", action);
+            println!("❌ Invalid action '{}'. Use 'add', 'remove', or 'list'", action);
         }
     }
+}
+
+fn handle_insert_combatant(combat_tracker: &mut CombatTracker, name: &str) {
+    println!("\n➕ Inserting new combatant: {}", name);
+    
+    // Check if character already exists in saved characters
+    let existing_characters = load_character_files();
+    if let Some(character) = existing_characters.iter().find(|c| c.name.eq_ignore_ascii_case(name)) {
+        println!("📝 Found existing character: {}", character.name);
+        
+        // Get initiative
+        let dex_mod = character.get_dexterity_modifier();
+        let dex_mod_str = if dex_mod >= 0 { format!("+{}", dex_mod) } else { dex_mod.to_string() };
+        
+        println!("Initiative for {} (DEX modifier: {}): ", character.name, dex_mod_str);
+        let mut init_input = String::new();
+        if io::stdin().read_line(&mut init_input).is_ok() {
+            let input = init_input.trim();
+            
+            if input.is_empty() {
+                // Auto-roll initiative
+                match dice::roll_dice_with_crits("1d20") {
+                    Ok((rolls, base_roll, crit_message)) => {
+                        let initiative = base_roll as i32 + dex_mod as i32;
+                        let mut message = format!("🎲 Rolled {} (d20: {}, DEX: {}) = {}", 
+                                initiative, rolls[0], dex_mod_str, initiative);
+                        
+                        if let Some(crit) = crit_message {
+                            message.push_str(&format!("\n{}", crit));
+                        }
+                        println!("{}", message);
+                        
+                        let combatant = Combatant::from_character(character.clone(), initiative);
+                        combat_tracker.add_combatant(combatant);
+                        println!("✅ Added {} to combat with initiative {}", character.name, initiative);
+                    }
+                    Err(e) => println!("❌ Error rolling initiative: {}", e),
+                }
+            } else if let Ok(initiative) = input.parse::<i32>() {
+                let combatant = Combatant::from_character(character.clone(), initiative);
+                combat_tracker.add_combatant(combatant);
+                println!("✅ Added {} to combat with initiative {}", character.name, initiative);
+            } else {
+                println!("❌ Invalid initiative value");
+            }
+        }
+    } else {
+        // Create new NPC
+        println!("📝 Creating new NPC: {}", name);
+        
+        print!("HP: ");
+        io::stdout().flush().unwrap();
+        let mut hp_input = String::new();
+        io::stdin().read_line(&mut hp_input).expect("Failed to read HP");
+        let hp = hp_input.trim().parse::<i32>().unwrap_or(10);
+        
+        print!("AC: ");
+        io::stdout().flush().unwrap();
+        let mut ac_input = String::new();
+        io::stdin().read_line(&mut ac_input).expect("Failed to read AC");
+        let ac = ac_input.trim().parse::<i32>().unwrap_or(10);
+        
+        print!("Initiative: ");
+        io::stdout().flush().unwrap();
+        let mut init_input = String::new();
+        io::stdin().read_line(&mut init_input).expect("Failed to read initiative");
+        let initiative = init_input.trim().parse::<i32>().unwrap_or(0);
+        
+        let combatant = Combatant::new_npc(name.to_string(), hp, ac, initiative);
+        combat_tracker.add_combatant(combatant);
+        println!("✅ Added {} to combat as NPC!", name);
+    }
+    
+    combat_tracker.display_initiative_order();
 }
