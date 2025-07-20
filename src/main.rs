@@ -1,4 +1,4 @@
-use std::io;
+use std::io::{self, Write};
 
 mod character;
 mod file_manager;
@@ -9,6 +9,11 @@ mod events;
 mod error_handling;
 mod combat;
 mod tests;
+
+fn clear_console() {
+    print!("\x1B[2J\x1B[1;1H");
+    io::stdout().flush().unwrap_or(());
+}
 
 use character::Character;
 use file_manager::{load_character_files, save_characters, display_single_character, display_all_characters, delete_character_menu};
@@ -284,6 +289,7 @@ fn enhanced_combat_mode(mut combat_tracker: CombatTracker) {
                 handle_status_command(&mut combat_tracker, &parts[1..]);
             }
             "next" | "continue" => {
+                clear_console();
                 if let Some(next_combatant) = combat_tracker.next_turn() {
                     println!("\n🎯 It's {}'s turn!", next_combatant.name);
                     next_combatant.display_stats();
