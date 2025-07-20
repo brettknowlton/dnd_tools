@@ -1,5 +1,5 @@
 use crate::character::Character;
-use crate::error_handling::{Result, AppError, validate_character_name, validate_numeric_input};
+use crate::error_handling::{Result, validate_character_name, validate_numeric_input};
 use std::{io, collections::HashMap};
 
 fn read_user_input(prompt: &str) -> Result<String> {

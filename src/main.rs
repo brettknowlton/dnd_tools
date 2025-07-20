@@ -10,7 +10,7 @@ mod error_handling;
 mod tests;
 
 use character::Character;
-use file_manager::{load_character_files, save_characters, display_character_info, display_single_character, display_all_characters, delete_character_menu};
+use file_manager::{load_character_files, save_characters, display_single_character, display_all_characters, delete_character_menu};
 use initiative::initiative_tracker_mode;
 use dice::roll_dice_mode;
 use input_handler::create_character;
