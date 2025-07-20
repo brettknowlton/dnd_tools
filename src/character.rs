@@ -1,6 +1,51 @@
 use serde::{Deserialize, Serialize};
 use std::{fs, io::{self, Write}};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AbilityScore {
+    Strength = 0,
+    Dexterity = 1,
+    Constitution = 2,
+    Wisdom = 3,
+    Intelligence = 4,
+    Charisma = 5,
+}
+
+impl AbilityScore {
+    pub fn all() -> [AbilityScore; 6] {
+        [
+            AbilityScore::Strength,
+            AbilityScore::Dexterity,
+            AbilityScore::Constitution,
+            AbilityScore::Wisdom,
+            AbilityScore::Intelligence,
+            AbilityScore::Charisma,
+        ]
+    }
+
+    pub fn name(&self) -> &'static str {
+        match self {
+            AbilityScore::Strength => "Strength",
+            AbilityScore::Dexterity => "Dexterity", 
+            AbilityScore::Constitution => "Constitution",
+            AbilityScore::Wisdom => "Wisdom",
+            AbilityScore::Intelligence => "Intelligence",
+            AbilityScore::Charisma => "Charisma",
+        }
+    }
+
+    pub fn short_name(&self) -> &'static str {
+        match self {
+            AbilityScore::Strength => "STR",
+            AbilityScore::Dexterity => "DEX",
+            AbilityScore::Constitution => "CON", 
+            AbilityScore::Wisdom => "WIS",
+            AbilityScore::Intelligence => "INT",
+            AbilityScore::Charisma => "CHA",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Suit {
     Hearts,
@@ -66,6 +111,138 @@ impl Character {
         }
     }
 
+    /// Calculate ability modifier from ability score using D&D rules:
+    /// Take the ability score and subtract 10. Divide the result by 2 and round down.
+    pub fn calculate_modifier(ability_score: u8) -> i8 {
+        ((ability_score as i16 - 10) / 2) as i8
+    }
+
+    pub fn get_ability_score(&self, ability: AbilityScore) -> Option<u8> {
+        match ability {
+            AbilityScore::Strength => self.stre,
+            AbilityScore::Dexterity => self.dext,
+            AbilityScore::Constitution => self.cons,
+            AbilityScore::Wisdom => self.wisd,
+            AbilityScore::Intelligence => self.intl,
+            AbilityScore::Charisma => self.chas,
+        }
+    }
+
+    pub fn get_ability_modifier(&self, ability: AbilityScore) -> i8 {
+        if let Some(score) = self.get_ability_score(ability) {
+            Self::calculate_modifier(score)
+        } else {
+            0 // Default modifier for missing scores
+        }
+    }
+
+    pub fn get_strength_modifier(&self) -> i8 {
+        self.get_ability_modifier(AbilityScore::Strength)
+    }
+
+    pub fn get_dexterity_modifier(&self) -> i8 {
+        self.get_ability_modifier(AbilityScore::Dexterity)
+    }
+
+    pub fn get_constitution_modifier(&self) -> i8 {
+        self.get_ability_modifier(AbilityScore::Constitution)
+    }
+
+    pub fn get_wisdom_modifier(&self) -> i8 {
+        self.get_ability_modifier(AbilityScore::Wisdom)
+    }
+
+    pub fn get_intelligence_modifier(&self) -> i8 {
+        self.get_ability_modifier(AbilityScore::Intelligence)
+    }
+
+    pub fn get_charisma_modifier(&self) -> i8 {
+        self.get_ability_modifier(AbilityScore::Charisma)
+    }
+
+    /// Calculate passive perception: 10 + Wisdom Modifier + Proficiency Bonus
+    pub fn calculate_passive_perception(&self) -> u8 {
+        let wisdom_mod = self.get_wisdom_modifier();
+        let prof_bonus = self.prof_bonus.unwrap_or(2) as i8;
+        (10 + wisdom_mod + prof_bonus).max(1) as u8
+    }
+
+    /// Ensure passive perception is calculated and up-to-date
+    pub fn update_passive_perception(&mut self) {
+        self.passive_perception = Some(self.calculate_passive_perception());
+    }
+
+    /// Check for missing stats and prompt user input
+    pub fn ensure_complete_stats(&mut self) {
+        if self.level.is_none() {
+            self.level = Some(self.prompt_for_stat("Level", "1").parse().unwrap_or(1));
+        }
+        if self.prof_bonus.is_none() {
+            let default_prof = match self.level.unwrap_or(1) {
+                1..=4 => 2,
+                5..=8 => 3,
+                9..=12 => 4,
+                13..=16 => 5,
+                _ => 6,
+            };
+            self.prof_bonus = Some(self.prompt_for_stat("Proficiency Bonus", &default_prof.to_string()).parse().unwrap_or(default_prof));
+        }
+
+        // Ensure all ability scores are present
+        if self.stre.is_none() {
+            self.stre = Some(self.prompt_for_stat("Strength", "10").parse().unwrap_or(10));
+        }
+        if self.dext.is_none() {
+            self.dext = Some(self.prompt_for_stat("Dexterity", "10").parse().unwrap_or(10));
+        }
+        if self.cons.is_none() {
+            self.cons = Some(self.prompt_for_stat("Constitution", "10").parse().unwrap_or(10));
+        }
+        if self.wisd.is_none() {
+            self.wisd = Some(self.prompt_for_stat("Wisdom", "10").parse().unwrap_or(10));
+        }
+        if self.intl.is_none() {
+            self.intl = Some(self.prompt_for_stat("Intelligence", "10").parse().unwrap_or(10));
+        }
+        if self.chas.is_none() {
+            self.chas = Some(self.prompt_for_stat("Charisma", "10").parse().unwrap_or(10));
+        }
+
+        // Ensure other core stats
+        if self.ac.is_none() {
+            self.ac = Some(self.prompt_for_stat("Armor Class", "10").parse().unwrap_or(10));
+        }
+        if self.max_hp.is_none() {
+            self.max_hp = Some(self.prompt_for_stat("Max HP", "10").parse().unwrap_or(10));
+        }
+        if self.hp.is_none() {
+            self.hp = self.max_hp;
+        }
+        if self.speed.is_none() {
+            self.speed = Some(self.prompt_for_stat("Speed", "30").parse().unwrap_or(30));
+        }
+
+        // Update calculated stats
+        self.update_passive_perception();
+    }
+
+    fn prompt_for_stat(&self, stat_name: &str, default_value: &str) -> String {
+        println!("{} is missing for {}. Enter {} (default: {}): ", 
+                 stat_name, self.name, stat_name, default_value);
+        
+        let mut input = String::new();
+        if std::io::stdin().read_line(&mut input).is_ok() {
+            let trimmed = input.trim();
+            if trimmed.is_empty() {
+                default_value.to_string()
+            } else {
+                trimmed.to_string()
+            }
+        } else {
+            default_value.to_string()
+        }
+    }
+
     pub fn get_value(&self, key: String) -> String {
         match key.as_str() {
             "name" => self.name.clone(),
@@ -102,15 +279,22 @@ impl Character {
         stats.push(format!("Max HP: {}", self.max_hp.unwrap_or(0)));
         stats.push(format!("Temp HP: {}", self.temp_hp.unwrap_or(0)));
         stats.push(format!("Speed: {}", self.speed.unwrap_or(0)));
-        stats.push(format!("Intelligence: {}", self.intl.unwrap_or(0)));
-        stats.push(format!("Wisdom: {}", self.wisd.unwrap_or(0)));
-        stats.push(format!("Charisma: {}", self.chas.unwrap_or(0)));
-        stats.push(format!("Strength: {}", self.stre.unwrap_or(0)));
-        stats.push(format!("Dexterity: {}", self.dext.unwrap_or(0)));
-        stats.push(format!("Constitution: {}", self.cons.unwrap_or(0)));
+
+        // Display ability scores in D&D standard order with modifiers
+        for ability in AbilityScore::all() {
+            let score = self.get_ability_score(ability).unwrap_or(10);
+            let modifier = Self::calculate_modifier(score);
+            let modifier_str = if modifier >= 0 {
+                format!("+{}", modifier)
+            } else {
+                modifier.to_string()
+            };
+            stats.push(format!("{}: {} ({})", ability.name(), score, modifier_str));
+        }
+
         stats.push(format!(
             "Passive Perception: {}",
-            self.passive_perception.unwrap_or(0)
+            self.passive_perception.unwrap_or_else(|| self.calculate_passive_perception())
         ));
         stats.push(format!("Initiative: {}", self.initiative.unwrap_or(0)));
         stats.push(format!(
