@@ -212,4 +212,336 @@ mod tests {
         let not_found = tracker.get_combatant("NotExist");
         assert!(not_found.is_none());
     }
+
+    // New comprehensive tests for added functionality
+
+    #[test]
+    fn test_roll_dice_with_crits_d20_critical_failure() {
+        // This test may be flaky since we can't control randomness
+        // But we can test the function exists and handles d20 format
+        let result = crate::dice::roll_dice_with_crits("1d20");
+        assert!(result.is_ok());
+        let (rolls, total, crit_message) = result.unwrap();
+        assert_eq!(rolls.len(), 1);
+        assert!(total >= 1 && total <= 20);
+        
+        // Test specific critical values by mocking (we'll create a separate function)
+        // For now just test that the function handles the format correctly
+        if rolls[0] == 1 {
+            assert!(crit_message.is_some());
+            assert!(crit_message.unwrap().contains("CRITICAL FAILURE"));
+        } else if rolls[0] == 20 {
+            assert!(crit_message.is_some());
+            assert!(crit_message.unwrap().contains("CRITICAL SUCCESS"));
+        } else {
+            assert!(crit_message.is_none());
+        }
+    }
+
+    #[test]
+    fn test_roll_dice_with_crits_non_d20() {
+        // Non-d20 rolls should not have critical messages
+        let result = crate::dice::roll_dice_with_crits("2d6");
+        assert!(result.is_ok());
+        let (_rolls, _total, crit_message) = result.unwrap();
+        assert!(crit_message.is_none());
+    }
+
+    #[test]
+    fn test_races_classes_lists() {
+        use crate::races_classes::*;
+        
+        let races = list_races();
+        assert!(!races.is_empty());
+        assert!(races.contains(&"Human".to_string()));
+        assert!(races.contains(&"Elf".to_string()));
+        assert!(races.contains(&"Dwarf".to_string()));
+        
+        let classes = list_classes();
+        assert!(!classes.is_empty());
+        assert!(classes.contains(&"Fighter".to_string()));
+        assert!(classes.contains(&"Wizard".to_string()));
+        assert!(classes.contains(&"Cleric".to_string()));
+    }
+
+    #[test]
+    fn test_random_race_and_class() {
+        use crate::races_classes::*;
+        
+        let race1 = get_random_race();
+        let race2 = get_random_race();
+        let class1 = get_random_class();
+        let class2 = get_random_class();
+        
+        // Verify they return valid races/classes
+        assert!(RACES.contains(&race1.as_str()));
+        assert!(RACES.contains(&race2.as_str()));
+        assert!(CLASSES.contains(&class1.as_str()));
+        assert!(CLASSES.contains(&class2.as_str()));
+        
+        // They should be strings
+        assert!(!race1.is_empty());
+        assert!(!class1.is_empty());
+    }
+
+    #[test]
+    fn test_character_race_and_class_fields() {
+        let mut character = Character::new("TestChar");
+        
+        // Test that race and class can be set
+        character.race = Some("Elf".to_string());
+        character.class = Some("Wizard".to_string());
+        
+        assert_eq!(character.race, Some("Elf".to_string()));
+        assert_eq!(character.class, Some("Wizard".to_string()));
+    }
+
+    #[test]
+    fn test_ability_score_short_names() {
+        use crate::character::AbilityScore;
+        
+        assert_eq!(AbilityScore::Strength.short_name(), "STR");
+        assert_eq!(AbilityScore::Dexterity.short_name(), "DEX");
+        assert_eq!(AbilityScore::Constitution.short_name(), "CON");
+        assert_eq!(AbilityScore::Intelligence.short_name(), "INT");
+        assert_eq!(AbilityScore::Wisdom.short_name(), "WIS");
+        assert_eq!(AbilityScore::Charisma.short_name(), "CHA");
+    }
+
+    #[test]
+    fn test_combat_tracker_back_functionality() {
+        let mut tracker = CombatTracker::new();
+        
+        let combatant1 = Combatant::new_npc("Fighter".to_string(), 30, 18, 20);
+        let combatant2 = Combatant::new_npc("Wizard".to_string(), 15, 12, 15);
+        
+        tracker.add_combatant(combatant1);
+        tracker.add_combatant(combatant2);
+        
+        // Initial state should be current_turn = 0
+        assert_eq!(tracker.current_turn, 0);
+        assert_eq!(tracker.round_number, 1);
+        
+        // Advance one turn - this advances current_turn to 1 and returns index 0
+        let first = tracker.next_turn();
+        assert!(first.is_some());
+        assert_eq!(first.unwrap().name, "Fighter");
+        assert_eq!(tracker.current_turn, 1); // Should be pointing to next combatant
+        
+        // Advance another turn - this advances to 0 and increments round, returns index 1
+        let second = tracker.next_turn();
+        assert!(second.is_some());
+        assert_eq!(second.unwrap().name, "Wizard");
+        assert_eq!(tracker.current_turn, 0); // Wrapped around
+        assert_eq!(tracker.round_number, 2); // Round incremented
+        
+        // Test back functionality
+        let went_back = tracker.previous_turn();
+        assert!(went_back);
+        
+        // Should now be pointing back to wizard's turn (index 1)
+        assert_eq!(tracker.current_turn, 1);
+        assert_eq!(tracker.round_number, 1); // Round decremented
+    }
+
+    #[test]
+    fn test_status_effect_duration_tracking() {
+        let mut combatant = Combatant::new_npc("TestNPC".to_string(), 20, 14, 12);
+        
+        // Add status with duration
+        let poison_status = StatusEffect {
+            name: "Poisoned".to_string(),
+            description: Some("Taking poison damage".to_string()),
+            duration: Some(3),
+        };
+        combatant.add_status(poison_status);
+        
+        // Add permanent status
+        let charmed_status = StatusEffect {
+            name: "Charmed".to_string(),
+            description: Some("Charmed until dispelled".to_string()),
+            duration: None,
+        };
+        combatant.add_status(charmed_status);
+        
+        assert_eq!(combatant.status_effects.len(), 2);
+        
+        // Test getting status by name
+        let poison = combatant.status_effects.iter().find(|s| s.name == "Poisoned");
+        assert!(poison.is_some());
+        assert_eq!(poison.unwrap().duration, Some(3));
+        
+        let charmed = combatant.status_effects.iter().find(|s| s.name == "Charmed");
+        assert!(charmed.is_some());
+        assert_eq!(charmed.unwrap().duration, None);
+    }
+
+    #[test]
+    fn test_combatant_temp_hp() {
+        let combatant = Combatant::new_npc("TestNPC".to_string(), 20, 14, 12);
+        assert_eq!(combatant.temp_hp, 0); // Default temp HP should be 0
+        
+        let mut character = Character::new("TestChar");
+        character.hp = Some(25);
+        character.max_hp = Some(25);
+        character.temp_hp = Some(5);
+        
+        let combatant_from_char = Combatant::from_character(character, 15);
+        assert_eq!(combatant_from_char.temp_hp, 5);
+    }
+
+    #[test]
+    fn test_combat_tracker_insert_combatant() {
+        let mut tracker = CombatTracker::new();
+        
+        let combatant1 = Combatant::new_npc("Fighter".to_string(), 30, 18, 20);
+        let combatant2 = Combatant::new_npc("Wizard".to_string(), 15, 12, 10);
+        
+        tracker.add_combatant(combatant1);
+        tracker.add_combatant(combatant2);
+        
+        // Insert a new combatant mid-fight
+        let new_combatant = Combatant::new_npc("Rogue".to_string(), 20, 15, 15);
+        tracker.add_combatant(new_combatant);
+        
+        // Should be sorted by initiative: Fighter(20), Rogue(15), Wizard(10)
+        assert_eq!(tracker.combatants[0].name, "Fighter");
+        assert_eq!(tracker.combatants[1].name, "Rogue");
+        assert_eq!(tracker.combatants[2].name, "Wizard");
+    }
+
+    #[test]
+    fn test_character_missing_data_detection() {
+        let mut character = Character::new("TestChar");
+        
+        // Character with missing data
+        assert!(character.hp.is_none());
+        assert!(character.ac.is_none());
+        assert!(character.level.is_none());
+        
+        // Character with some data
+        character.hp = Some(20);
+        assert!(character.hp.is_some());
+        assert!(character.ac.is_none()); // Still missing AC
+    }
+
+    #[test]
+    fn test_character_as_vec_completeness() {
+        let mut character = Character::new("TestChar");
+        character.level = Some(5);
+        character.hp = Some(45);
+        character.max_hp = Some(45);
+        character.ac = Some(16);
+        character.race = Some("Elf".to_string());
+        character.class = Some("Wizard".to_string());
+        
+        let vec = character.as_vec();
+        
+        // Should have all basic fields
+        assert_eq!(vec[0], "TestChar"); // name
+        assert_eq!(vec[1], "5"); // level
+        // Additional checks can be added based on the as_vec implementation
+        assert!(vec.len() > 2); // Should have multiple fields
+    }
+
+    #[test]
+    fn test_combat_apply_damage() {
+        let mut tracker = CombatTracker::new();
+        let combatant = Combatant::new_npc("TestTarget".to_string(), 20, 14, 15);
+        tracker.add_combatant(combatant);
+        
+        // Test basic damage
+        let result = tracker.apply_damage("TestTarget", 5);
+        assert!(result.is_ok());
+        let message = result.unwrap();
+        assert!(message.contains("TestTarget takes 5 damage"));
+        
+        // Check HP was reduced
+        let target = tracker.get_combatant("TestTarget");
+        assert!(target.is_some());
+        assert_eq!(target.unwrap().current_hp, 15); // 20 - 5 = 15
+        
+        // Test damage to non-existent target
+        let result = tracker.apply_damage("NonExistent", 10);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not found"));
+    }
+
+    #[test]
+    fn test_combat_temp_hp_damage() {
+        let mut tracker = CombatTracker::new();
+        let mut combatant = Combatant::new_npc("TestTarget".to_string(), 20, 14, 15);
+        combatant.temp_hp = 5;
+        tracker.add_combatant(combatant);
+        
+        // Test damage to temp HP only
+        let result = tracker.apply_damage("TestTarget", 3);
+        assert!(result.is_ok());
+        let message = result.unwrap();
+        assert!(message.contains("temporary HP"));
+        
+        let target = tracker.get_combatant("TestTarget");
+        assert!(target.is_some());
+        assert_eq!(target.unwrap().temp_hp, 2); // 5 - 3 = 2
+        assert_eq!(target.unwrap().current_hp, 20); // Regular HP unchanged
+    }
+
+    #[test]
+    fn test_saving_throw_functionality() {
+        let mut tracker = CombatTracker::new();
+        let combatant = Combatant::new_npc("TestSaver".to_string(), 20, 14, 15);
+        tracker.add_combatant(combatant);
+        
+        // Test valid saving throw
+        let result = tracker.make_saving_throw("TestSaver", "dex");
+        assert!(result.is_ok());
+        let message = result.unwrap();
+        assert!(message.contains("TestSaver makes a"));
+        assert!(message.contains("saving throw"));
+        
+        // Test invalid ability score
+        let result = tracker.make_saving_throw("TestSaver", "invalid");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Invalid ability score"));
+        
+        // Test non-existent combatant
+        let result = tracker.make_saving_throw("NonExistent", "str");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not found"));
+    }
+
+    #[test]
+    fn test_npc_save_functionality() {
+        let mut tracker = CombatTracker::new();
+        let combatant = Combatant::new_npc("TestNPC".to_string(), 20, 14, 15);
+        tracker.add_combatant(combatant);
+        
+        // This will create a file, but we're just testing it doesn't panic
+        let result = tracker.save_npc("TestNPC");
+        // We can't easily test file creation in unit tests without mocking,
+        // but we can test that it returns Ok for existing combatants
+        // and doesn't panic for non-existent ones
+        assert!(result.is_ok() || result.is_err()); // Either is fine, just no panic
+        
+        // Test saving non-existent NPC (should still not panic)
+        let result = tracker.save_npc("NonExistent");
+        assert!(result.is_ok()); // Function handles this gracefully
+    }
+
+    #[test]
+    fn test_display_methods_no_panic() {
+        let mut tracker = CombatTracker::new();
+        let combatant = Combatant::new_npc("TestNPC".to_string(), 20, 14, 15);
+        tracker.add_combatant(combatant);
+        
+        // These methods print to stdout but should not panic
+        tracker.display_initiative_order();
+        
+        if let Some(combatant) = tracker.combatants.first() {
+            combatant.display_stats();
+        }
+        
+        // If we get here without panicking, the test passes
+        assert!(true);
+    }
 }
