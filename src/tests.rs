@@ -665,40 +665,6 @@ mod tests {
         }
     }
     
-    #[test] 
-    fn test_field_mode_exit_integration() {
-        // Test that interactive field mode integrates with exit checking
-        
-        let field_inputs = vec![
-            "name",
-            "description",
-            "level", 
-            "q",
-            "",
-            "EXIT", // Would exit
-            "QUIT", // Would exit
-        ];
-        
-        for input in field_inputs {
-            let trimmed = input.trim();
-            let would_exit = trimmed.to_uppercase() == "EXIT" || trimmed.to_uppercase() == "QUIT";
-            let would_continue_field_mode = !trimmed.is_empty() && 
-                                           trimmed.to_lowercase() != "q" && 
-                                           trimmed.to_lowercase() != "quit" &&
-                                           !would_exit;
-                                           
-            if would_exit {
-                assert!(would_exit);
-            } else if trimmed.is_empty() || trimmed.to_lowercase() == "q" {
-                // These would exit field mode but not the program  
-                assert!(!would_continue_field_mode);
-            } else {
-                // These would continue field querying
-                assert!(would_continue_field_mode);
-            }
-        }
-    }
-    
     #[test]
     fn test_suggestion_selection_exit_integration() {
         // Test that suggestion selection integrates with exit checking
@@ -727,71 +693,24 @@ mod tests {
     }
     
     #[test]
-    fn test_field_selection_logic() {
+    fn test_search_integration() {
         use crate::search::*;
         
-        // Test that detailed results should enter field mode
-        let spell_result = SearchResult::Spell(SpellDetail {
-            index: "test-spell".to_string(),
-            name: "Test Spell".to_string(),
-            level: "1st-level".to_string(),
-            school: "Evocation".to_string(),
-            casting_time: "1 action".to_string(),
-            range: "Touch".to_string(),
-            components: "V".to_string(),
-            duration: "Instantaneous".to_string(),
-            description: "Test description".to_string(),
-            higher_level: "".to_string(),
-            spell_lists: "Wizard".to_string(),
-        });
+        // Test new simplified structure
+        let page = WikiPageContent {
+            index: "test-page".to_string(),
+            name: "Test Page".to_string(),
+            url: "http://dnd5e.wikidot.com/test-page".to_string(),
+            content: "This is test content for a D&D page".to_string(),
+            content_type: "spell".to_string(),
+        };
         
-        let class_result = SearchResult::Class(ClassDetail {
-            index: "test-class".to_string(),
-            name: "Test Class".to_string(),
-            hit_die: "1d8".to_string(),
-            proficiencies: "Light armor".to_string(),
-            saving_throws: "Wisdom".to_string(),
-            skills: "Choose two skills".to_string(),
-            equipment: "Starting equipment".to_string(),
-        });
+        let result = SearchResult { page };
         
-        let equipment_result = SearchResult::Equipment(EquipmentDetail {
-            index: "test-equipment".to_string(),
-            name: "Test Equipment".to_string(),
-            category: "Weapon".to_string(),
-            cost: "10 gp".to_string(),
-            weight: "2 lb".to_string(),
-            description: "Test description".to_string(),
-            properties: "Versatile".to_string(),
-        });
+        assert_eq!(result.name(), "Test Page");
+        assert_eq!(result.index(), "test-page");
         
-        let reference_result = SearchResult::Reference(WikiReference {
-            index: "test-reference".to_string(),
-            name: "Test Reference".to_string(),
-            url: "http://dnd5e.wikidot.com/test-references/test".to_string(),
-        });
-        
-        // Test field mode decision logic
-        // Note: We can't directly call should_enter_field_mode from tests since it's private,
-        // but we can test the logic that should be applied
-        match &spell_result {
-            SearchResult::Spell(_) => assert!(true, "Spells should enter field mode"),
-            _ => assert!(false, "Expected spell result"),
-        }
-        
-        match &class_result {
-            SearchResult::Class(_) => assert!(true, "Classes should enter field mode"),
-            _ => assert!(false, "Expected class result"),
-        }
-        
-        match &equipment_result {
-            SearchResult::Equipment(_) => assert!(true, "Equipment should enter field mode"),
-            _ => assert!(false, "Expected equipment result"),
-        }
-        
-        match &reference_result {
-            SearchResult::Reference(_) => assert!(true, "References should NOT enter field mode normally"),
-            _ => assert!(false, "Expected reference result"),
-        }
+        // Test that the content display doesn't panic
+        result.display();
     }
 }

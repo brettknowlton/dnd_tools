@@ -1169,12 +1169,6 @@ fn display_search_results(results: &[SearchResult]) {
             println!("\n--- Result {} ---", i + 1);
         }
         result.display();
-        
-        // Only enter interactive field query mode for detailed results
-        // References have limited useful fields, so we skip field mode for them
-        if should_enter_field_mode(result) {
-            interactive_field_mode(result);
-        }
     }
     
     if results.len() > 1 {
@@ -1187,66 +1181,6 @@ fn display_search_results(results: &[SearchResult]) {
     println!("\nPress Enter to continue...");
     let mut _buffer = String::new();
     let _ = io::stdin().read_line(&mut _buffer);
-}
-
-fn should_enter_field_mode(result: &SearchResult) -> bool {
-    match result {
-        SearchResult::Spell(_) => true,      // Spells have rich detailed fields
-        SearchResult::Class(_) => true,      // Classes have meaningful proficiency data  
-        SearchResult::Equipment(_) => true,  // Equipment has cost, weight, descriptions
-        SearchResult::Reference(_) => false, // References only have basic name/index/url
-    }
-}
-
-fn interactive_field_mode(result: &SearchResult) {
-    let available_fields = result.get_available_fields();
-    
-    println!("\n📋 Available fields to query:");
-    for (i, field) in available_fields.iter().enumerate() {
-        print!("{:<15} ", field);
-        if (i + 1) % 5 == 0 {
-            println!();
-        }
-    }
-    if available_fields.len() % 5 != 0 {
-        println!();
-    }
-    
-    println!("\n💡 Type a field name to view its data, or press Enter/type 'q' to continue");
-    println!("    (Type 'EXIT' at any time to quit the program completely)");
-    
-    loop {
-        print!("Field > ");
-        io::stdout().flush().unwrap_or(());
-        
-        let mut input = String::new();
-        if io::stdin().read_line(&mut input).is_err() {
-            println!("Failed to read input");
-            continue;
-        }
-        
-        let input = input.trim();
-        
-        // Check for universal exit command first
-        check_universal_exit(input);
-        
-        // Exit conditions
-        if input.is_empty() || input.to_lowercase() == "q" || input.to_lowercase() == "quit" {
-            break;
-        }
-        
-        // Check if the field exists (case-insensitive)
-        let matching_field = available_fields.iter()
-            .find(|&field| field.to_lowercase() == input.to_lowercase());
-        
-        if let Some(field) = matching_field {
-            result.display_field(field);
-            println!("\nPress Enter to continue querying fields, or type 'q' to finish...");
-        } else {
-            println!("❌ Field '{}' not available.", input);
-            println!("Available fields: {}", available_fields.join(", "));
-        }
-    }
 }
 
 fn show_search_help() {
@@ -1274,8 +1208,7 @@ fn show_search_help() {
     println!();
     println!("FEATURES:");
     println!("  • Live data fetching from dnd5e.wikidot.com");
-    println!("  • Detailed spell, class, and equipment information");
-    println!("  • Interactive field querying for detailed data exploration");
+    println!("  • Complete page content displayed with nice formatting");
     println!("  • Smart query variations for better match finding");
     println!("  • Case-insensitive search with flexible input parsing");
     println!("  • Universal EXIT command works from any prompt");
