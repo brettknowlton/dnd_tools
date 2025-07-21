@@ -1,4 +1,5 @@
 use std::io::{self, Write};
+use std::process;
 use crate::search::{DndSearchClient, SearchCategory, SearchResult};
 
 mod character;
@@ -16,6 +17,16 @@ mod search;
 fn clear_console() {
     print!("\x1B[2J\x1B[1;1H");
     io::stdout().flush().unwrap_or(());
+}
+
+/// Check if input is a universal exit command and exit the program if so
+fn check_universal_exit(input: &str) {
+    let trimmed = input.trim();
+    if trimmed.to_uppercase() == "EXIT" || trimmed.to_uppercase() == "QUIT" {
+        println!("\n🚪 Universal EXIT command detected - terminating program...");
+        println!("Goodbye! 👋");
+        process::exit(0);
+    }
 }
 
 use character::Character;
@@ -46,6 +57,10 @@ fn main() -> io::Result<()> {
         
         let mut buffer = String::new();
         io::stdin().read_line(&mut buffer)?;
+        
+        // Check for universal exit command
+        check_universal_exit(&buffer);
+        
         match buffer.trim() {
             "1" => characters_menu(&mut characters),
             "2" => tools_menu(),
@@ -972,6 +987,7 @@ fn search_mode() {
         println!("  categories - List available categories");
         println!("  help - Show detailed help");
         println!("  back - Return to tools menu");
+        println!("  EXIT - Quit program immediately");
         println!();
         print!("Search > ");
         io::stdout().flush().unwrap_or(());
@@ -983,6 +999,10 @@ fn search_mode() {
         }
         
         let input = input.trim();
+        
+        // Check for universal exit command
+        check_universal_exit(input);
+        
         if input.is_empty() {
             continue;
         }
@@ -1081,6 +1101,10 @@ async fn handle_search_command(client: &DndSearchClient, query: &str, category: 
                     let mut choice_input = String::new();
                     if io::stdin().read_line(&mut choice_input).is_ok() {
                         let choice_input = choice_input.trim();
+                        
+                        // Check for universal exit command
+                        check_universal_exit(choice_input);
+                        
                         if !choice_input.is_empty() {
                             if let Ok(choice) = choice_input.parse::<usize>() {
                                 if choice > 0 && choice <= suggestions.len() {
@@ -1175,6 +1199,7 @@ fn interactive_field_mode(result: &SearchResult) {
     }
     
     println!("\n💡 Type a field name to view its data, or press Enter/type 'q' to continue");
+    println!("    (Type 'EXIT' at any time to quit the program completely)");
     
     loop {
         print!("Field > ");
@@ -1187,6 +1212,9 @@ fn interactive_field_mode(result: &SearchResult) {
         }
         
         let input = input.trim();
+        
+        // Check for universal exit command first
+        check_universal_exit(input);
         
         // Exit conditions
         if input.is_empty() || input.to_lowercase() == "q" || input.to_lowercase() == "quit" {
@@ -1232,10 +1260,12 @@ fn show_search_help() {
     println!();
     println!("FEATURES:");
     println!("  • Exact match search with detailed information");
+    println!("  • Interactive field querying for detailed data exploration");
     println!("  • Fuzzy matching when exact matches aren't found");
     println!("  • Smart suggestions with 'Did you mean..?' prompts");
     println!("  • Offline fallback using cached common D&D data");
     println!("  • Case-insensitive search");
+    println!("  • Universal EXIT command works from any prompt");
     println!();
     println!("NETWORK:");
     println!("  The tool attempts to fetch data from the D&D 5e API online.");
