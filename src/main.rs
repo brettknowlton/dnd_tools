@@ -1280,6 +1280,10 @@ fn show_search_help() {
     println!("  • Case-insensitive search with flexible input parsing");
     println!("  • Universal EXIT command works from any prompt");
     println!();
+    println!("INPUT REQUIREMENTS:");
+    println!("  • All commands must end with pressing Enter (newline)");
+    println!("  • This prevents the program from hanging on input prompts");
+    println!();
     println!("NETWORK:");
     println!("  The tool fetches live data from the D&D 5e Wikidot community site.");
     println!("  Internet connection is required for search functionality.");

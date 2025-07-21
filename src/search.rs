@@ -759,14 +759,14 @@ impl DndSearchClient {
         
         let query_lower = query.to_lowercase();
         
-        // Common spell suggestions
-        if query_lower.contains("fire") {
+        // Common spell suggestions with better prefix matching
+        if query_lower.contains("fire") || "fireball".starts_with(&query_lower) || "fire".starts_with(&query_lower) {
             suggestions.extend(vec!["fireball".to_string(), "fire-bolt".to_string(), "burning-hands".to_string()]);
         }
-        if query_lower.contains("heal") {
+        if query_lower.contains("heal") || "heal".starts_with(&query_lower) || "healing".starts_with(&query_lower) {
             suggestions.extend(vec!["cure-wounds".to_string(), "healing-word".to_string(), "heal".to_string()]);
         }
-        if query_lower.contains("light") {
+        if query_lower.contains("light") || "light".starts_with(&query_lower) || "lightning".starts_with(&query_lower) {
             suggestions.extend(vec!["light".to_string(), "dancing-lights".to_string(), "lightning-bolt".to_string()]);
         }
         
