@@ -1300,7 +1300,7 @@ async fn test_api_connectivity(client: &DndSearchClient) {
     }
     
     // Test a simple API endpoint
-    let test_url = "https://www.dnd5eapi.co/api/spells";
+    let test_url = "https://www.dnd5eapi.co/api/2014/spells";
     
     match reqwest::Client::new()
         .get(test_url)

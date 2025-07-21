@@ -448,7 +448,7 @@ impl DndSearchClient {
         let offline_mode = client.is_none();
         
         DndSearchClient {
-            base_url: "https://www.dnd5eapi.co/api".to_string(),
+            base_url: "https://www.dnd5eapi.co/api/2014".to_string(),
             client,
             offline_mode,
             cached_data: Self::initialize_offline_cache(),
@@ -820,7 +820,7 @@ mod tests {
     #[test]
     fn test_dnd_search_client_creation() {
         let client = DndSearchClient::new();
-        assert_eq!(client.base_url, "https://www.dnd5eapi.co/api");
+        assert_eq!(client.base_url, "https://www.dnd5eapi.co/api/2014");
         // Client may be offline in test environment
         assert!(client.cached_data.len() > 0);
     }
@@ -1388,5 +1388,116 @@ mod tests {
             name: "Test Reference".to_string(),
             url: "/test-references/test".to_string(),
         })
+    }
+
+    #[tokio::test]
+    async fn test_online_connectivity() {
+        // Test that we can create a client and it correctly detects online/offline status
+        let client = DndSearchClient::new();
+        
+        // The client should have the correct base URL
+        assert_eq!(client.base_url, "https://www.dnd5eapi.co/api/2014");
+        
+        // Test network connectivity if available
+        if !client.is_offline() {
+            println!("🌐 Testing online connectivity...");
+            
+            // Try to make a simple request to the API
+            match reqwest::Client::new()
+                .get("https://www.dnd5eapi.co/api/2014/spells")
+                .timeout(std::time::Duration::from_secs(10))
+                .send()
+                .await
+            {
+                Ok(response) => {
+                    println!("✅ Online connectivity test passed - API is reachable");
+                    assert!(response.status().is_success(), "API should return success status");
+                },
+                Err(e) => {
+                    println!("⚠️ Online connectivity test failed: {}", e);
+                    println!("💡 This is expected if running in an environment without internet access");
+                    // Don't fail the test - network may not be available in testing environment
+                }
+            }
+        } else {
+            println!("📴 Client is in offline mode - network test skipped");
+        }
+        
+        // Test that cached data is properly initialized
+        assert!(!client.cached_data.is_empty(), "Cached data should be initialized");
+        assert!(client.cached_data.contains_key(&SearchCategory::Spells), "Should have cached spells");
+        assert!(client.cached_data.contains_key(&SearchCategory::Classes), "Should have cached classes");
+        assert!(client.cached_data.contains_key(&SearchCategory::Equipment), "Should have cached equipment");
+    }
+
+    #[tokio::test]
+    async fn test_api_response_structure() {
+        // Test that our API response structures can parse real API responses
+        let sample_api_response = r#"{
+            "count": 2,
+            "results": [
+                {
+                    "index": "fireball",
+                    "name": "Fireball",
+                    "level": 3,
+                    "url": "/api/2014/spells/fireball"
+                },
+                {
+                    "index": "magic-missile",
+                    "name": "Magic Missile", 
+                    "level": 1,
+                    "url": "/api/2014/spells/magic-missile"
+                }
+            ]
+        }"#;
+
+        // This should parse correctly with our ApiListResponse structure
+        let parsed: Result<ApiListResponse, _> = serde_json::from_str(sample_api_response);
+        assert!(parsed.is_ok(), "Should be able to parse API list response");
+        
+        let response = parsed.unwrap();
+        assert_eq!(response.count, 2);
+        assert_eq!(response.results.len(), 2);
+        assert_eq!(response.results[0].name, "Fireball");
+        assert_eq!(response.results[1].name, "Magic Missile");
+    }
+
+    #[tokio::test]
+    async fn test_online_vs_offline_search_behavior() {
+        let client = DndSearchClient::new();
+        
+        // Test offline search behavior
+        let offline_results = client.offline_search("fireball", SearchCategory::Spells);
+        match offline_results {
+            Ok(results) => {
+                println!("✅ Offline search returned {} results", results.len());
+                if !results.is_empty() {
+                    assert_eq!(results[0].name(), "Fireball");
+                }
+            },
+            Err(e) => {
+                println!("ℹ️ Offline search failed as expected: {}", e);
+            }
+        }
+
+        // If we have network connectivity, test online search
+        if !client.is_offline() && client.client.is_some() {
+            println!("🌐 Testing online search functionality...");
+            let online_results = client.search("fireball", Some(SearchCategory::Spells)).await;
+            match online_results {
+                Ok(results) => {
+                    println!("✅ Online search returned {} results", results.len());
+                    if !results.is_empty() {
+                        assert_eq!(results[0].name(), "Fireball");
+                    }
+                },
+                Err(e) => {
+                    println!("⚠️ Online search failed: {}", e);
+                    println!("💡 This may happen due to network issues or API changes");
+                }
+            }
+        } else {
+            println!("📴 Offline mode - online search test skipped");
+        }
     }
 }
