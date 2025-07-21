@@ -146,6 +146,281 @@ impl SearchResult {
             SearchResult::Reference(reference) => &reference.index,
         }
     }
+
+    /// Get available fields that can be queried for this result type
+    pub fn get_available_fields(&self) -> Vec<String> {
+        match self {
+            SearchResult::Spell(_) => vec![
+                "name".to_string(),
+                "level".to_string(),
+                "school".to_string(),
+                "casting_time".to_string(),
+                "range".to_string(),
+                "components".to_string(),
+                "duration".to_string(),
+                "description".to_string(),
+                "higher_level".to_string(),
+            ],
+            SearchResult::Class(_) => vec![
+                "name".to_string(),
+                "hit_die".to_string(),
+                "proficiencies".to_string(),
+                "saving_throws".to_string(),
+                "proficiency_choices".to_string(),
+            ],
+            SearchResult::Equipment(_) => vec![
+                "name".to_string(),
+                "category".to_string(),
+                "gear_category".to_string(),
+                "weapon_category".to_string(),
+                "armor_category".to_string(),
+                "cost".to_string(),
+                "weight".to_string(),
+                "description".to_string(),
+            ],
+            SearchResult::Reference(_) => vec![
+                "name".to_string(),
+                "index".to_string(),
+                "url".to_string(),
+            ],
+        }
+    }
+
+    /// Get the value of a specific field
+    pub fn get_field_value(&self, field: &str) -> Option<String> {
+        match self {
+            SearchResult::Spell(spell) => {
+                match field.to_lowercase().as_str() {
+                    "name" => Some(spell.name.clone()),
+                    "level" => Some(format!("Level {}", spell.level)),
+                    "school" => Some(spell.school.name.clone()),
+                    "casting_time" => Some(spell.casting_time.clone()),
+                    "range" => Some(spell.range.clone()),
+                    "components" => Some(spell.components.join(", ")),
+                    "duration" => Some(spell.duration.clone()),
+                    "description" => {
+                        if spell.description.is_empty() {
+                            Some("No description available".to_string())
+                        } else {
+                            Some(spell.description.join("\n"))
+                        }
+                    },
+                    "higher_level" => {
+                        if spell.higher_level.is_empty() {
+                            Some("No higher level effects".to_string())
+                        } else {
+                            Some(spell.higher_level.join("\n"))
+                        }
+                    },
+                    _ => None,
+                }
+            },
+            SearchResult::Class(class) => {
+                match field.to_lowercase().as_str() {
+                    "name" => Some(class.name.clone()),
+                    "hit_die" => Some(format!("d{}", class.hit_die)),
+                    "proficiencies" => {
+                        if class.proficiencies.is_empty() {
+                            Some("No proficiencies listed".to_string())
+                        } else {
+                            Some(class.proficiencies.iter()
+                                .map(|p| p.name.as_str())
+                                .collect::<Vec<_>>()
+                                .join(", "))
+                        }
+                    },
+                    "saving_throws" => {
+                        if class.saving_throws.is_empty() {
+                            Some("No saving throw proficiencies listed".to_string())
+                        } else {
+                            Some(class.saving_throws.iter()
+                                .map(|s| s.name.as_str())
+                                .collect::<Vec<_>>()
+                                .join(", "))
+                        }
+                    },
+                    "proficiency_choices" => {
+                        if class.proficiency_choices.is_empty() {
+                            Some("No proficiency choices listed".to_string())
+                        } else {
+                            Some(format!("{} proficiency choices available", class.proficiency_choices.len()))
+                        }
+                    },
+                    _ => None,
+                }
+            },
+            SearchResult::Equipment(equipment) => {
+                match field.to_lowercase().as_str() {
+                    "name" => Some(equipment.name.clone()),
+                    "category" => Some(equipment.equipment_category.name.clone()),
+                    "gear_category" => {
+                        if let Some(ref gear_cat) = equipment.gear_category {
+                            Some(gear_cat.name.clone())
+                        } else {
+                            Some("No gear category".to_string())
+                        }
+                    },
+                    "weapon_category" => {
+                        equipment.weapon_category.clone()
+                            .unwrap_or_else(|| "Not a weapon".to_string()).into()
+                    },
+                    "armor_category" => {
+                        equipment.armor_category.clone()
+                            .unwrap_or_else(|| "Not armor".to_string()).into()
+                    },
+                    "cost" => {
+                        if let Some(ref cost) = equipment.cost {
+                            Some(format!("{} {}", cost.quantity, cost.unit))
+                        } else {
+                            Some("No cost listed".to_string())
+                        }
+                    },
+                    "weight" => {
+                        if let Some(weight) = equipment.weight {
+                            Some(format!("{} lb", weight))
+                        } else {
+                            Some("No weight listed".to_string())
+                        }
+                    },
+                    "description" => {
+                        if equipment.description.is_empty() {
+                            Some("No description available".to_string())
+                        } else {
+                            Some(equipment.description.join("\n"))
+                        }
+                    },
+                    _ => None,
+                }
+            },
+            SearchResult::Reference(reference) => {
+                match field.to_lowercase().as_str() {
+                    "name" => Some(reference.name.clone()),
+                    "index" => Some(reference.index.clone()),
+                    "url" => Some(reference.url.clone()),
+                    _ => None,
+                }
+            },
+        }
+    }
+
+    /// Display a specific field in a formatted way
+    pub fn display_field(&self, field: &str) {
+        if let Some(value) = self.get_field_value(field) {
+            println!("\n╔══════════════════════════════════════════╗");
+            println!("║ {}: {:<33} ║", 
+                field.to_uppercase(), 
+                if field.len() > 33 { &field[..33] } else { field });
+            println!("╠══════════════════════════════════════════╣");
+            
+            // Handle multi-line values
+            for line in value.lines() {
+                let truncated = if line.len() > 38 {
+                    format!("{}...", &line[..35])
+                } else {
+                    line.to_string()
+                };
+                println!("║ {:<40} ║", truncated);
+            }
+            
+            println!("╚══════════════════════════════════════════╝");
+        } else {
+            println!("\n❌ Field '{}' not available for this result type", field);
+        }
+    }
+
+    pub fn display(&self) {
+        match self {
+            SearchResult::Spell(spell) => self.display_spell(spell),
+            SearchResult::Class(class) => self.display_class(class),
+            SearchResult::Equipment(equipment) => self.display_equipment(equipment),
+            SearchResult::Reference(reference) => self.display_reference(reference),
+        }
+    }
+
+    fn display_spell(&self, spell: &SpellDetail) {
+        println!("\n╔═══════════════════════════════════════╗");
+        println!("║                SPELL                  ║");
+        println!("╠═══════════════════════════════════════╣");
+        println!("║ Name: {:<31} ║", spell.name);
+        println!("║ Level: {:<30} ║", spell.level);
+        println!("║ School: {:<29} ║", spell.school.name);
+        println!("║ Casting Time: {:<23} ║", spell.casting_time);
+        println!("║ Range: {:<30} ║", spell.range);
+        println!("║ Components: {:<25} ║", spell.components.join(", "));
+        println!("║ Duration: {:<27} ║", spell.duration);
+        println!("╚═══════════════════════════════════════╝");
+        
+        if !spell.description.is_empty() {
+            println!("\nDescription:");
+            for desc in &spell.description {
+                println!("  {}", desc);
+            }
+        }
+        
+        if !spell.higher_level.is_empty() {
+            println!("\nAt Higher Levels:");
+            for higher in &spell.higher_level {
+                println!("  {}", higher);
+            }
+        }
+    }
+
+    fn display_class(&self, class: &ClassDetail) {
+        println!("\n╔═══════════════════════════════════════╗");
+        println!("║                CLASS                  ║");
+        println!("╠═══════════════════════════════════════╣");
+        println!("║ Name: {:<31} ║", class.name);
+        println!("║ Hit Die: d{:<27} ║", class.hit_die);
+        println!("╚═══════════════════════════════════════╝");
+        
+        if !class.proficiencies.is_empty() {
+            println!("\nProficiencies:");
+            for prof in &class.proficiencies {
+                println!("  • {}", prof.name);
+            }
+        }
+        
+        if !class.saving_throws.is_empty() {
+            println!("\nSaving Throw Proficiencies:");
+            for save in &class.saving_throws {
+                println!("  • {}", save.name);
+            }
+        }
+    }
+
+    fn display_equipment(&self, equipment: &EquipmentDetail) {
+        println!("\n╔═══════════════════════════════════════╗");
+        println!("║              EQUIPMENT                ║");
+        println!("╠═══════════════════════════════════════╣");
+        println!("║ Name: {:<31} ║", equipment.name);
+        println!("║ Category: {:<27} ║", equipment.equipment_category.name);
+        
+        if let Some(cost) = &equipment.cost {
+            println!("║ Cost: {} {:<24} ║", cost.quantity, cost.unit);
+        }
+        
+        if let Some(weight) = equipment.weight {
+            println!("║ Weight: {:<27} lb ║", weight);
+        }
+        
+        println!("╚═══════════════════════════════════════╝");
+        
+        if !equipment.description.is_empty() {
+            println!("\nDescription:");
+            for desc in &equipment.description {
+                println!("  {}", desc);
+            }
+        }
+    }
+
+    fn display_reference(&self, reference: &ApiReference) {
+        println!("\n╔═══════════════════════════════════════╗");
+        println!("║              REFERENCE                ║");
+        println!("╠═══════════════════════════════════════╣");
+        println!("║ Name: {:<31} ║", reference.name);
+        println!("║ Index: {:<30} ║", reference.index);
+        println!("╚═══════════════════════════════════════╝");
+    }
 }
 
 // Main search client
@@ -489,103 +764,6 @@ impl DndSearchClient {
     }
 }
 
-// Display functions
-impl SearchResult {
-    pub fn display(&self) {
-        match self {
-            SearchResult::Spell(spell) => self.display_spell(spell),
-            SearchResult::Class(class) => self.display_class(class),
-            SearchResult::Equipment(equipment) => self.display_equipment(equipment),
-            SearchResult::Reference(reference) => self.display_reference(reference),
-        }
-    }
-
-    fn display_spell(&self, spell: &SpellDetail) {
-        println!("\n╔═══════════════════════════════════════╗");
-        println!("║                SPELL                  ║");
-        println!("╠═══════════════════════════════════════╣");
-        println!("║ Name: {:<31} ║", spell.name);
-        println!("║ Level: {:<30} ║", spell.level);
-        println!("║ School: {:<29} ║", spell.school.name);
-        println!("║ Casting Time: {:<23} ║", spell.casting_time);
-        println!("║ Range: {:<30} ║", spell.range);
-        println!("║ Components: {:<25} ║", spell.components.join(", "));
-        println!("║ Duration: {:<27} ║", spell.duration);
-        println!("╚═══════════════════════════════════════╝");
-        
-        if !spell.description.is_empty() {
-            println!("\nDescription:");
-            for desc in &spell.description {
-                println!("  {}", desc);
-            }
-        }
-        
-        if !spell.higher_level.is_empty() {
-            println!("\nAt Higher Levels:");
-            for higher in &spell.higher_level {
-                println!("  {}", higher);
-            }
-        }
-    }
-
-    fn display_class(&self, class: &ClassDetail) {
-        println!("\n╔═══════════════════════════════════════╗");
-        println!("║                CLASS                  ║");
-        println!("╠═══════════════════════════════════════╣");
-        println!("║ Name: {:<31} ║", class.name);
-        println!("║ Hit Die: d{:<27} ║", class.hit_die);
-        println!("╚═══════════════════════════════════════╝");
-        
-        if !class.proficiencies.is_empty() {
-            println!("\nProficiencies:");
-            for prof in &class.proficiencies {
-                println!("  • {}", prof.name);
-            }
-        }
-        
-        if !class.saving_throws.is_empty() {
-            println!("\nSaving Throw Proficiencies:");
-            for save in &class.saving_throws {
-                println!("  • {}", save.name);
-            }
-        }
-    }
-
-    fn display_equipment(&self, equipment: &EquipmentDetail) {
-        println!("\n╔═══════════════════════════════════════╗");
-        println!("║              EQUIPMENT                ║");
-        println!("╠═══════════════════════════════════════╣");
-        println!("║ Name: {:<31} ║", equipment.name);
-        println!("║ Category: {:<27} ║", equipment.equipment_category.name);
-        
-        if let Some(cost) = &equipment.cost {
-            println!("║ Cost: {} {:<24} ║", cost.quantity, cost.unit);
-        }
-        
-        if let Some(weight) = equipment.weight {
-            println!("║ Weight: {:<27} lb ║", weight);
-        }
-        
-        println!("╚═══════════════════════════════════════╝");
-        
-        if !equipment.description.is_empty() {
-            println!("\nDescription:");
-            for desc in &equipment.description {
-                println!("  {}", desc);
-            }
-        }
-    }
-
-    fn display_reference(&self, reference: &ApiReference) {
-        println!("\n╔═══════════════════════════════════════╗");
-        println!("║              REFERENCE                ║");
-        println!("╠═══════════════════════════════════════╣");
-        println!("║ Name: {:<31} ║", reference.name);
-        println!("║ Index: {:<30} ║", reference.index);
-        println!("╚═══════════════════════════════════════╝");
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -760,5 +938,455 @@ mod tests {
         assert!(all_categories.contains(&SearchCategory::Equipment));
         assert!(all_categories.contains(&SearchCategory::Monsters));
         assert!(all_categories.contains(&SearchCategory::Races));
+    }
+
+    #[test]
+    fn test_spell_available_fields() {
+        let spell = SpellDetail {
+            index: "fireball".to_string(),
+            name: "Fireball".to_string(),
+            level: 3,
+            school: ApiReference {
+                index: "evocation".to_string(),
+                name: "Evocation".to_string(),
+                url: "/magic-schools/evocation".to_string(),
+            },
+            casting_time: "1 action".to_string(),
+            range: "150 feet".to_string(),
+            components: vec!["V".to_string(), "S".to_string(), "M".to_string()],
+            duration: "Instantaneous".to_string(),
+            description: vec!["A bright streak flashes...".to_string()],
+            higher_level: vec!["When you cast this spell...".to_string()],
+        };
+        
+        let result = SearchResult::Spell(spell);
+        let fields = result.get_available_fields();
+        
+        assert_eq!(fields.len(), 9);
+        assert!(fields.contains(&"name".to_string()));
+        assert!(fields.contains(&"level".to_string()));
+        assert!(fields.contains(&"school".to_string()));
+        assert!(fields.contains(&"casting_time".to_string()));
+        assert!(fields.contains(&"range".to_string()));
+        assert!(fields.contains(&"components".to_string()));
+        assert!(fields.contains(&"duration".to_string()));
+        assert!(fields.contains(&"description".to_string()));
+        assert!(fields.contains(&"higher_level".to_string()));
+    }
+
+    #[test]
+    fn test_class_available_fields() {
+        let class = ClassDetail {
+            index: "fighter".to_string(),
+            name: "Fighter".to_string(),
+            hit_die: 10,
+            proficiency_choices: vec![],
+            proficiencies: vec![],
+            saving_throws: vec![],
+        };
+        
+        let result = SearchResult::Class(class);
+        let fields = result.get_available_fields();
+        
+        assert_eq!(fields.len(), 5);
+        assert!(fields.contains(&"name".to_string()));
+        assert!(fields.contains(&"hit_die".to_string()));
+        assert!(fields.contains(&"proficiencies".to_string()));
+        assert!(fields.contains(&"saving_throws".to_string()));
+        assert!(fields.contains(&"proficiency_choices".to_string()));
+    }
+
+    #[test]
+    fn test_equipment_available_fields() {
+        let equipment = EquipmentDetail {
+            index: "longsword".to_string(),
+            name: "Longsword".to_string(),
+            equipment_category: ApiReference {
+                index: "weapon".to_string(),
+                name: "Weapon".to_string(),
+                url: "/equipment-categories/weapon".to_string(),
+            },
+            gear_category: None,
+            weapon_category: Some("Martial Melee".to_string()),
+            armor_category: None,
+            cost: Some(Cost {
+                quantity: 15,
+                unit: "gp".to_string(),
+            }),
+            weight: Some(3.0),
+            description: vec!["A versatile weapon.".to_string()],
+        };
+        
+        let result = SearchResult::Equipment(equipment);
+        let fields = result.get_available_fields();
+        
+        assert_eq!(fields.len(), 8);
+        assert!(fields.contains(&"name".to_string()));
+        assert!(fields.contains(&"category".to_string()));
+        assert!(fields.contains(&"cost".to_string()));
+        assert!(fields.contains(&"weight".to_string()));
+    }
+
+    #[test]
+    fn test_reference_available_fields() {
+        let reference = ApiReference {
+            index: "fireball".to_string(),
+            name: "Fireball".to_string(),
+            url: "/spells/fireball".to_string(),
+        };
+        
+        let result = SearchResult::Reference(reference);
+        let fields = result.get_available_fields();
+        
+        assert_eq!(fields.len(), 3);
+        assert!(fields.contains(&"name".to_string()));
+        assert!(fields.contains(&"index".to_string()));
+        assert!(fields.contains(&"url".to_string()));
+    }
+
+    #[test]
+    fn test_spell_field_values() {
+        let spell = SpellDetail {
+            index: "fireball".to_string(),
+            name: "Fireball".to_string(),
+            level: 3,
+            school: ApiReference {
+                index: "evocation".to_string(),
+                name: "Evocation".to_string(),
+                url: "/magic-schools/evocation".to_string(),
+            },
+            casting_time: "1 action".to_string(),
+            range: "150 feet".to_string(),
+            components: vec!["V".to_string(), "S".to_string(), "M".to_string()],
+            duration: "Instantaneous".to_string(),
+            description: vec!["A bright streak flashes...".to_string()],
+            higher_level: vec![],
+        };
+        
+        let result = SearchResult::Spell(spell);
+        
+        assert_eq!(result.get_field_value("name"), Some("Fireball".to_string()));
+        assert_eq!(result.get_field_value("level"), Some("Level 3".to_string()));
+        assert_eq!(result.get_field_value("school"), Some("Evocation".to_string()));
+        assert_eq!(result.get_field_value("casting_time"), Some("1 action".to_string()));
+        assert_eq!(result.get_field_value("range"), Some("150 feet".to_string()));
+        assert_eq!(result.get_field_value("components"), Some("V, S, M".to_string()));
+        assert_eq!(result.get_field_value("duration"), Some("Instantaneous".to_string()));
+        assert_eq!(result.get_field_value("description"), Some("A bright streak flashes...".to_string()));
+        assert_eq!(result.get_field_value("higher_level"), Some("No higher level effects".to_string()));
+        assert_eq!(result.get_field_value("invalid_field"), None);
+    }
+
+    #[test]
+    fn test_class_field_values() {
+        let class = ClassDetail {
+            index: "fighter".to_string(),
+            name: "Fighter".to_string(),
+            hit_die: 10,
+            proficiency_choices: vec![],
+            proficiencies: vec![
+                ApiReference {
+                    index: "armor-light".to_string(),
+                    name: "Light Armor".to_string(),
+                    url: "/proficiencies/armor-light".to_string(),
+                }
+            ],
+            saving_throws: vec![
+                ApiReference {
+                    index: "str".to_string(),
+                    name: "Strength".to_string(),
+                    url: "/ability-scores/str".to_string(),
+                }
+            ],
+        };
+        
+        let result = SearchResult::Class(class);
+        
+        assert_eq!(result.get_field_value("name"), Some("Fighter".to_string()));
+        assert_eq!(result.get_field_value("hit_die"), Some("d10".to_string()));
+        assert_eq!(result.get_field_value("proficiencies"), Some("Light Armor".to_string()));
+        assert_eq!(result.get_field_value("saving_throws"), Some("Strength".to_string()));
+        assert_eq!(result.get_field_value("proficiency_choices"), Some("No proficiency choices listed".to_string()));
+        assert_eq!(result.get_field_value("invalid_field"), None);
+    }
+
+    #[test]
+    fn test_equipment_field_values() {
+        let equipment = EquipmentDetail {
+            index: "longsword".to_string(),
+            name: "Longsword".to_string(),
+            equipment_category: ApiReference {
+                index: "weapon".to_string(),
+                name: "Weapon".to_string(),
+                url: "/equipment-categories/weapon".to_string(),
+            },
+            gear_category: None,
+            weapon_category: Some("Martial Melee".to_string()),
+            armor_category: None,
+            cost: Some(Cost {
+                quantity: 15,
+                unit: "gp".to_string(),
+            }),
+            weight: Some(3.0),
+            description: vec!["A versatile weapon.".to_string()],
+        };
+        
+        let result = SearchResult::Equipment(equipment);
+        
+        assert_eq!(result.get_field_value("name"), Some("Longsword".to_string()));
+        assert_eq!(result.get_field_value("category"), Some("Weapon".to_string()));
+        assert_eq!(result.get_field_value("gear_category"), Some("No gear category".to_string()));
+        assert_eq!(result.get_field_value("weapon_category"), Some("Martial Melee".to_string()));
+        assert_eq!(result.get_field_value("armor_category"), Some("Not armor".to_string()));
+        assert_eq!(result.get_field_value("cost"), Some("15 gp".to_string()));
+        assert_eq!(result.get_field_value("weight"), Some("3 lb".to_string()));
+        assert_eq!(result.get_field_value("description"), Some("A versatile weapon.".to_string()));
+        assert_eq!(result.get_field_value("invalid_field"), None);
+    }
+
+    #[test]
+    fn test_reference_field_values() {
+        let reference = ApiReference {
+            index: "fireball".to_string(),
+            name: "Fireball".to_string(),
+            url: "/spells/fireball".to_string(),
+        };
+        
+        let result = SearchResult::Reference(reference);
+        
+        assert_eq!(result.get_field_value("name"), Some("Fireball".to_string()));
+        assert_eq!(result.get_field_value("index"), Some("fireball".to_string()));
+        assert_eq!(result.get_field_value("url"), Some("/spells/fireball".to_string()));
+        assert_eq!(result.get_field_value("invalid_field"), None);
+    }
+
+    #[test]
+    fn test_field_case_insensitive() {
+        let spell = SpellDetail {
+            index: "fireball".to_string(),
+            name: "Fireball".to_string(),
+            level: 3,
+            school: ApiReference {
+                index: "evocation".to_string(),
+                name: "Evocation".to_string(),
+                url: "/magic-schools/evocation".to_string(),
+            },
+            casting_time: "1 action".to_string(),
+            range: "150 feet".to_string(),
+            components: vec!["V".to_string(), "S".to_string(), "M".to_string()],
+            duration: "Instantaneous".to_string(),
+            description: vec!["A bright streak flashes...".to_string()],
+            higher_level: vec![],
+        };
+        
+        let result = SearchResult::Spell(spell);
+        
+        // Test case insensitive field queries
+        assert_eq!(result.get_field_value("NAME"), Some("Fireball".to_string()));
+        assert_eq!(result.get_field_value("Level"), Some("Level 3".to_string()));
+        assert_eq!(result.get_field_value("SCHOOL"), Some("Evocation".to_string()));
+        assert_eq!(result.get_field_value("casting_TIME"), Some("1 action".to_string()));
+    }
+
+    #[test]
+    fn test_empty_descriptions_and_lists() {
+        let spell = SpellDetail {
+            index: "test".to_string(),
+            name: "Test Spell".to_string(),
+            level: 1,
+            school: ApiReference {
+                index: "test".to_string(),
+                name: "Test School".to_string(),
+                url: "/test".to_string(),
+            },
+            casting_time: "1 action".to_string(),
+            range: "Touch".to_string(),
+            components: vec![],
+            duration: "Instantaneous".to_string(),
+            description: vec![],
+            higher_level: vec![],
+        };
+        
+        let result = SearchResult::Spell(spell);
+        
+        assert_eq!(result.get_field_value("description"), Some("No description available".to_string()));
+        assert_eq!(result.get_field_value("higher_level"), Some("No higher level effects".to_string()));
+        assert_eq!(result.get_field_value("components"), Some("".to_string()));
+        
+        // Test class with empty lists
+        let class = ClassDetail {
+            index: "test".to_string(),
+            name: "Test Class".to_string(),
+            hit_die: 8,
+            proficiency_choices: vec![],
+            proficiencies: vec![],
+            saving_throws: vec![],
+        };
+        
+        let class_result = SearchResult::Class(class);
+        assert_eq!(class_result.get_field_value("proficiencies"), Some("No proficiencies listed".to_string()));
+        assert_eq!(class_result.get_field_value("saving_throws"), Some("No saving throw proficiencies listed".to_string()));
+    }
+
+    #[test]
+    fn test_multiline_descriptions() {
+        let spell = SpellDetail {
+            index: "test".to_string(),
+            name: "Test Spell".to_string(),
+            level: 1,
+            school: ApiReference {
+                index: "test".to_string(),
+                name: "Test School".to_string(),
+                url: "/test".to_string(),
+            },
+            casting_time: "1 action".to_string(),
+            range: "Touch".to_string(),
+            components: vec!["V".to_string()],
+            duration: "Instantaneous".to_string(),
+            description: vec![
+                "First line of description.".to_string(),
+                "Second line of description.".to_string(),
+            ],
+            higher_level: vec![
+                "First higher level effect.".to_string(),
+                "Second higher level effect.".to_string(),
+            ],
+        };
+        
+        let result = SearchResult::Spell(spell);
+        
+        let expected_description = "First line of description.\nSecond line of description.";
+        let expected_higher = "First higher level effect.\nSecond higher level effect.";
+        
+        assert_eq!(result.get_field_value("description"), Some(expected_description.to_string()));
+        assert_eq!(result.get_field_value("higher_level"), Some(expected_higher.to_string()));
+    }
+
+    #[test]
+    fn test_interactive_field_functionality() {
+        // Test that all field types return expected available fields
+        let spell_result = create_test_spell_result();
+        let spell_fields = spell_result.get_available_fields();
+        assert!(spell_fields.contains(&"name".to_string()));
+        assert!(spell_fields.contains(&"description".to_string()));
+        assert_eq!(spell_fields.len(), 9);
+
+        let class_result = create_test_class_result();
+        let class_fields = class_result.get_available_fields();
+        assert!(class_fields.contains(&"name".to_string()));
+        assert!(class_fields.contains(&"hit_die".to_string()));
+        assert_eq!(class_fields.len(), 5);
+
+        let equipment_result = create_test_equipment_result();
+        let equipment_fields = equipment_result.get_available_fields();
+        assert!(equipment_fields.contains(&"name".to_string()));
+        assert!(equipment_fields.contains(&"cost".to_string()));
+        assert_eq!(equipment_fields.len(), 8);
+
+        let reference_result = create_test_reference_result();
+        let reference_fields = reference_result.get_available_fields();
+        assert!(reference_fields.contains(&"name".to_string()));
+        assert!(reference_fields.contains(&"index".to_string()));
+        assert_eq!(reference_fields.len(), 3);
+    }
+
+    #[test]
+    fn test_field_value_retrieval_comprehensive() {
+        let spell_result = create_test_spell_result();
+        
+        // Test all spell fields
+        assert!(spell_result.get_field_value("name").is_some());
+        assert!(spell_result.get_field_value("level").is_some());
+        assert!(spell_result.get_field_value("school").is_some());
+        assert!(spell_result.get_field_value("casting_time").is_some());
+        assert!(spell_result.get_field_value("range").is_some());
+        assert!(spell_result.get_field_value("components").is_some());
+        assert!(spell_result.get_field_value("duration").is_some());
+        assert!(spell_result.get_field_value("description").is_some());
+        assert!(spell_result.get_field_value("higher_level").is_some());
+        
+        // Test non-existent field
+        assert!(spell_result.get_field_value("nonexistent_field").is_none());
+    }
+
+    #[test]
+    fn test_display_field_handling() {
+        let spell_result = create_test_spell_result();
+        
+        // This test verifies that display_field doesn't panic
+        // We can't easily test the output, but we can ensure it doesn't crash
+        let field_value = spell_result.get_field_value("name");
+        assert!(field_value.is_some());
+        
+        let invalid_field_value = spell_result.get_field_value("invalid");
+        assert!(invalid_field_value.is_none());
+    }
+
+    // Helper functions for creating test data
+    fn create_test_spell_result() -> SearchResult {
+        SearchResult::Spell(SpellDetail {
+            index: "test-spell".to_string(),
+            name: "Test Spell".to_string(),
+            level: 3,
+            school: ApiReference {
+                index: "evocation".to_string(),
+                name: "Evocation".to_string(),
+                url: "/magic-schools/evocation".to_string(),
+            },
+            casting_time: "1 action".to_string(),
+            range: "120 feet".to_string(),
+            components: vec!["V".to_string(), "S".to_string()],
+            duration: "Concentration, up to 1 minute".to_string(),
+            description: vec!["Test spell description".to_string()],
+            higher_level: vec!["Higher level effects".to_string()],
+        })
+    }
+
+    fn create_test_class_result() -> SearchResult {
+        SearchResult::Class(ClassDetail {
+            index: "test-class".to_string(),
+            name: "Test Class".to_string(),
+            hit_die: 8,
+            proficiency_choices: vec![],
+            proficiencies: vec![ApiReference {
+                index: "test-prof".to_string(),
+                name: "Test Proficiency".to_string(),
+                url: "/proficiencies/test".to_string(),
+            }],
+            saving_throws: vec![ApiReference {
+                index: "wis".to_string(),
+                name: "Wisdom".to_string(),
+                url: "/ability-scores/wis".to_string(),
+            }],
+        })
+    }
+
+    fn create_test_equipment_result() -> SearchResult {
+        SearchResult::Equipment(EquipmentDetail {
+            index: "test-equipment".to_string(),
+            name: "Test Equipment".to_string(),
+            equipment_category: ApiReference {
+                index: "weapon".to_string(),
+                name: "Weapon".to_string(),
+                url: "/equipment-categories/weapon".to_string(),
+            },
+            gear_category: None,
+            weapon_category: Some("Simple Melee".to_string()),
+            armor_category: None,
+            cost: Some(Cost {
+                quantity: 10,
+                unit: "gp".to_string(),
+            }),
+            weight: Some(2.5),
+            description: vec!["Test equipment description".to_string()],
+        })
+    }
+
+    fn create_test_reference_result() -> SearchResult {
+        SearchResult::Reference(ApiReference {
+            index: "test-reference".to_string(),
+            name: "Test Reference".to_string(),
+            url: "/test-references/test".to_string(),
+        })
     }
 }

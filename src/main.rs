@@ -1051,25 +1051,33 @@ async fn handle_search_command(client: &DndSearchClient, query: &str, category: 
         Ok(results) => {
             if results.is_empty() {
                 // No exact match found, get suggestions
+                println!("❌ No exact match found for '{}'", query);
+                
                 let suggestions = client.get_suggestions(query, category).await;
                 
                 if suggestions.is_empty() {
-                    println!("❌ No results found for '{}'", query);
-                    if let Some(cat) = category {
+                    println!("🔍 No similar items found either.");
+                    if let Some(_cat) = category {
                         println!("💡 Try searching in a different category or check your spelling");
                     } else {
                         println!("💡 Try specifying a category: search <category> <query>");
                         println!("   Example: search spell {}", query);
                     }
                 } else {
-                    println!("❌ No exact match found for '{}'", query);
-                    println!("🔍 Did you mean one of these?");
+                    println!("🔍 Here are some suggestions that might be what you're looking for:");
+                    println!("   (These are the closest matches found)");
+                    println!();
                     
                     for (i, suggestion) in suggestions.iter().enumerate() {
-                        println!("  {}. {}", i + 1, suggestion);
+                        println!("  {}. {} 📝", i + 1, suggestion);
                     }
                     
-                    println!("\nEnter the number of your choice (1-{}), or press Enter to skip:", suggestions.len());
+                    println!();
+                    println!("💡 Would you like to search for one of these suggestions?");
+                    println!("   Enter the number of your choice (1-{}), or press Enter to skip:", suggestions.len());
+                    print!("Choice > ");
+                    io::stdout().flush().unwrap_or(());
+                    
                     let mut choice_input = String::new();
                     if io::stdin().read_line(&mut choice_input).is_ok() {
                         let choice_input = choice_input.trim();
@@ -1082,18 +1090,24 @@ async fn handle_search_command(client: &DndSearchClient, query: &str, category: 
                                     // Search again with the selected suggestion
                                     match client.search(selected, category).await {
                                         Ok(suggestion_results) => {
-                                            display_search_results(&suggestion_results);
+                                            if suggestion_results.is_empty() {
+                                                println!("❌ No detailed results found for '{}'", selected);
+                                            } else {
+                                                display_search_results(&suggestion_results);
+                                            }
                                         },
                                         Err(e) => {
                                             println!("❌ Error searching for suggestion: {}", e);
                                         }
                                     }
                                 } else {
-                                    println!("Invalid choice.");
+                                    println!("❌ Invalid choice. Please select a number between 1 and {}", suggestions.len());
                                 }
                             } else {
-                                println!("Invalid input.");
+                                println!("❌ Invalid input. Please enter a number or press Enter to skip.");
                             }
+                        } else {
+                            println!("👍 Skipping suggestions.");
                         }
                     }
                 }
@@ -1104,6 +1118,19 @@ async fn handle_search_command(client: &DndSearchClient, query: &str, category: 
         Err(e) => {
             println!("❌ Search failed: {}", e);
             println!("💡 This might be due to network issues. The search will fall back to cached data.");
+            
+            // Still try to show suggestions even if the main search failed
+            println!("🔍 Checking for suggestions in cached data...");
+            let suggestions = client.get_suggestions(query, category).await;
+            
+            if !suggestions.is_empty() {
+                println!("📝 Found these similar items in cached data:");
+                for (i, suggestion) in suggestions.iter().enumerate() {
+                    println!("  {}. {}", i + 1, suggestion);
+                }
+                
+                println!("\nTry searching for one of these when the network is available.");
+            }
         }
     }
 }
@@ -1116,6 +1143,9 @@ fn display_search_results(results: &[SearchResult]) {
             println!("\n--- Result {} ---", i + 1);
         }
         result.display();
+        
+        // Enter interactive field query mode
+        interactive_field_mode(result);
     }
     
     if results.len() > 1 {
@@ -1128,6 +1158,53 @@ fn display_search_results(results: &[SearchResult]) {
     println!("\nPress Enter to continue...");
     let mut _buffer = String::new();
     let _ = io::stdin().read_line(&mut _buffer);
+}
+
+fn interactive_field_mode(result: &SearchResult) {
+    let available_fields = result.get_available_fields();
+    
+    println!("\n📋 Available fields to query:");
+    for (i, field) in available_fields.iter().enumerate() {
+        print!("{:<15} ", field);
+        if (i + 1) % 5 == 0 {
+            println!();
+        }
+    }
+    if available_fields.len() % 5 != 0 {
+        println!();
+    }
+    
+    println!("\n💡 Type a field name to view its data, or press Enter/type 'q' to continue");
+    
+    loop {
+        print!("Field > ");
+        io::stdout().flush().unwrap_or(());
+        
+        let mut input = String::new();
+        if io::stdin().read_line(&mut input).is_err() {
+            println!("Failed to read input");
+            continue;
+        }
+        
+        let input = input.trim();
+        
+        // Exit conditions
+        if input.is_empty() || input.to_lowercase() == "q" || input.to_lowercase() == "quit" {
+            break;
+        }
+        
+        // Check if the field exists (case-insensitive)
+        let matching_field = available_fields.iter()
+            .find(|&field| field.to_lowercase() == input.to_lowercase());
+        
+        if let Some(field) = matching_field {
+            result.display_field(field);
+            println!("\nPress Enter to continue querying fields, or type 'q' to finish...");
+        } else {
+            println!("❌ Field '{}' not available.", input);
+            println!("Available fields: {}", available_fields.join(", "));
+        }
+    }
 }
 
 fn show_search_help() {
