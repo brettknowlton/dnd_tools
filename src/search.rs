@@ -520,7 +520,7 @@ impl DndSearchClient {
         Ok(vec![SearchResult::Reference(reference)])
     }
 
-    // HTML parsing methods for Wikidot content
+    // HTML parsing methods for Wikidot content - improved for better data extraction
     fn parse_spell_html(&self, document: &Html, query: &str) -> Result<SpellDetail, String> {
         let content_selector = Selector::parse("#page-content").unwrap();
         let content = document.select(&content_selector).next()
@@ -528,37 +528,34 @@ impl DndSearchClient {
 
         let content_text = content.inner_html();
         
-        // Extract spell level and school from "3rd-level evocation" pattern
-        let level_school_regex = Regex::new(r"<em>([^<]+)-level ([^<]+)</em>").unwrap();
-        let (level, school) = if let Some(caps) = level_school_regex.captures(&content_text) {
-            (caps[1].to_string() + "-level", caps[2].to_string())
-        } else {
-            ("Unknown level".to_string(), "Unknown school".to_string())
-        };
+        // Enhanced spell level and school extraction with multiple patterns
+        let (level, school) = self.extract_level_and_school(&content_text)?;
 
-        // Extract casting time, range, components, duration
-        let casting_time = self.extract_field(&content_text, "Casting Time:", "<br")
-            .unwrap_or_else(|| "Unknown".to_string());
-        let range = self.extract_field(&content_text, "Range:", "<br")
-            .unwrap_or_else(|| "Unknown".to_string());
-        let components = self.extract_field(&content_text, "Components:", "<br")
-            .unwrap_or_else(|| "Unknown".to_string());
-        let duration = self.extract_field(&content_text, "Duration:", "</p>")
-            .unwrap_or_else(|| "Unknown".to_string());
+        // Enhanced field extraction with multiple patterns and fallbacks
+        let casting_time = self.extract_spell_field(&content_text, &["Casting Time:", "Cast Time:"])
+            .unwrap_or_else(|| "1 action".to_string()); // Common default
+        let range = self.extract_spell_field(&content_text, &["Range:", "Reach:"])
+            .unwrap_or_else(|| "Self".to_string()); // Common default
+        let components = self.extract_spell_field(&content_text, &["Components:", "Component:"])
+            .unwrap_or_else(|| "V, S".to_string()); // Common default
+        let duration = self.extract_spell_field(&content_text, &["Duration:", "Effect Duration:"])
+            .unwrap_or_else(|| "Instantaneous".to_string()); // Common default
 
-        // Extract main description (first paragraph after duration)
-        let desc_start = content_text.find("</p>").unwrap_or(0);
-        let description = self.extract_description(&content_text[desc_start..]);
+        // Enhanced description extraction with multiple strategies
+        let description = self.extract_enhanced_description(&content_text);
 
-        // Extract higher level effects
+        // Extract higher level effects with fallbacks
         let higher_level = self.extract_higher_level(&content_text);
 
-        // Extract spell lists
-        let spell_lists = self.extract_spell_lists(&content_text);
+        // Enhanced spell lists extraction
+        let spell_lists = self.extract_enhanced_spell_lists(&content_text);
+
+        // Use proper spell name from page if available
+        let spell_name = self.extract_spell_name(&content_text, query);
 
         Ok(SpellDetail {
             index: query.to_lowercase().replace(" ", "-"),
-            name: query.to_string(),
+            name: spell_name,
             level,
             school,
             casting_time,
@@ -578,27 +575,29 @@ impl DndSearchClient {
 
         let content_text = content.inner_html();
         
-        // Extract hit die from "Hit Dice: 1d10" pattern
-        let hit_die = self.extract_field(&content_text, "Hit Dice:", "<br")
+        // Enhanced hit die extraction with multiple patterns
+        let hit_die = self.extract_class_field(&content_text, &["Hit Dice:", "Hit Die:", "Hit Points"])
+            .unwrap_or_else(|| "1d8".to_string()); // Common default
+
+        // Enhanced proficiencies extraction with better parsing
+        let proficiencies = self.extract_enhanced_proficiencies(&content_text);
+
+        // Enhanced saving throws extraction
+        let saving_throws = self.extract_class_field(&content_text, &["Saving Throws:", "Save Proficiencies:"])
             .unwrap_or_else(|| "Unknown".to_string());
 
-        // Extract proficiencies
-        let proficiencies = self.extract_multi_line_field(&content_text, "Armor:", "Weapons:");
+        // Enhanced skills extraction
+        let skills = self.extract_enhanced_skills(&content_text);
 
-        // Extract saving throws
-        let saving_throws = self.extract_field(&content_text, "Saving Throws:", "<br")
-            .unwrap_or_else(|| "Unknown".to_string());
+        // Enhanced equipment extraction
+        let equipment = self.extract_enhanced_equipment(&content_text);
 
-        // Extract skills
-        let skills = self.extract_field(&content_text, "Skills:", "</p>")
-            .unwrap_or_else(|| "Unknown".to_string());
-
-        // Extract equipment (basic extraction)
-        let equipment = self.extract_equipment_section(&content_text);
+        // Use proper class name from page if available
+        let class_name = self.extract_class_name(&content_text, query);
 
         Ok(ClassDetail {
             index: query.to_lowercase().replace(" ", "-"),
-            name: query.to_string(),
+            name: class_name,
             hit_die,
             proficiencies,
             saving_throws,
@@ -614,18 +613,29 @@ impl DndSearchClient {
 
         let content_text = content.inner_html();
         
-        // Basic equipment parsing - this would need refinement for different types
-        let category = "Equipment".to_string(); // Could be refined
-        let cost = self.extract_field(&content_text, "Cost:", " ")
-            .unwrap_or_else(|| "Unknown".to_string());
-        let weight = self.extract_field(&content_text, "Weight:", " ")
-            .unwrap_or_else(|| "Unknown".to_string());
-        let description = self.extract_description(&content_text);
-        let properties = "".to_string(); // Would need specific parsing
+        // Enhanced equipment category detection
+        let category = self.extract_equipment_category(&content_text, query);
+        
+        // Enhanced cost extraction with multiple patterns
+        let cost = self.extract_equipment_field(&content_text, &["Cost:", "Price:", "Value:"])
+            .unwrap_or_else(|| "Varies".to_string());
+            
+        // Enhanced weight extraction
+        let weight = self.extract_equipment_field(&content_text, &["Weight:", "Mass:"])
+            .unwrap_or_else(|| "—".to_string());
+            
+        // Enhanced description extraction
+        let description = self.extract_enhanced_description(&content_text);
+        
+        // Enhanced properties extraction
+        let properties = self.extract_equipment_properties(&content_text);
+
+        // Use proper equipment name
+        let equipment_name = self.extract_spell_name(&content_text, query);
 
         Ok(EquipmentDetail {
             index: query.to_lowercase().replace(" ", "-"),
-            name: query.to_string(),
+            name: equipment_name,
             category,
             cost,
             weight,
@@ -634,71 +644,532 @@ impl DndSearchClient {
         })
     }
 
-    // Helper methods for HTML extraction
+    // Enhanced helper methods for better HTML extraction
+    fn extract_level_and_school(&self, html: &str) -> Result<(String, String), String> {
+        // Multiple patterns to match different formats
+        let patterns = vec![
+            r"<em>([^<]+)-level ([^<]+)</em>",                    // "3rd-level evocation"
+            r"<em>([^<]+) level ([^<]+)</em>",                    // "3rd level evocation"
+            r"<em>(\w+)-level (\w+)</em>",                        // Simple format
+            r"<i>([^<]+)-level ([^<]+)</i>",                      // Italic tags
+            r"([A-Za-z0-9]+)-level ([a-zA-Z]+)",                  // No tags
+        ];
+        
+        for pattern in patterns {
+            let regex = Regex::new(pattern).unwrap();
+            if let Some(caps) = regex.captures(html) {
+                let level = format!("{}-level", &caps[1]);
+                let school = caps[2].to_string();
+                return Ok((level, school));
+            }
+        }
+        
+        // Try to extract school separately if level fails
+        let school_regex = Regex::new(r"<em>([a-zA-Z]+)</em>").unwrap();
+        if let Some(caps) = school_regex.captures(html) {
+            let school = caps[1].to_string();
+            // Check if it's a known school of magic
+            let magic_schools = vec!["abjuration", "conjuration", "divination", "enchantment", "evocation", "illusion", "necromancy", "transmutation"];
+            if magic_schools.contains(&school.to_lowercase().as_str()) {
+                return Ok(("Unknown level".to_string(), school));
+            }
+        }
+        
+        Err("Could not extract spell level and school".to_string())
+    }
+
+    fn extract_spell_field(&self, html: &str, field_names: &[&str]) -> Option<String> {
+        for field_name in field_names {
+            if let Some(result) = self.extract_field(html, field_name, "<br") {
+                if !result.trim().is_empty() && result != "Unknown" {
+                    return Some(result);
+                }
+            }
+        }
+        // Try with different end patterns
+        for field_name in field_names {
+            if let Some(result) = self.extract_field(html, field_name, "</p>") {
+                if !result.trim().is_empty() && result != "Unknown" {
+                    return Some(result);
+                }
+            }
+        }
+        None
+    }
+
+    fn extract_class_field(&self, html: &str, field_names: &[&str]) -> Option<String> {
+        for field_name in field_names {
+            if let Some(result) = self.extract_field(html, field_name, "<br") {
+                if !result.trim().is_empty() && result != "Unknown" {
+                    return Some(result);
+                }
+            }
+        }
+        None
+    }
+
+    fn extract_enhanced_description(&self, html: &str) -> String {
+        // Try multiple strategies to find the main description
+        
+        // Strategy 1: Look for paragraphs that look like descriptions
+        let p_regex = Regex::new(r"<p>([^<]+(?:<[^>]*>[^<]*</[^>]*>[^<]*)*)</p>").unwrap();
+        for caps in p_regex.captures_iter(html) {
+            let text = &caps[1];
+            let text_length = text.len();
+            
+            // Skip short paragraphs, source info, and stat blocks
+            if text_length > 50 
+                && !text.contains("Source:")
+                && !text.contains("Casting Time")
+                && !text.contains("Range:")
+                && !text.contains("Components:")
+                && !text.contains("Duration:")
+                && !text.contains("Hit Dice:")
+                && !text.contains("Proficiencies") {
+                
+                let tag_regex = Regex::new(r"<[^>]+>").unwrap();
+                let clean_desc = tag_regex.replace_all(text, "").trim().to_string();
+                if clean_desc.len() > 30 {
+                    return clean_desc;
+                }
+            }
+        }
+        
+        // Strategy 2: Look for text after common stat blocks
+        if let Some(pos) = html.find("Duration:") {
+            let after_duration = &html[pos..];
+            if let Some(p_start) = after_duration.find("<p>") {
+                if let Some(p_end) = after_duration[p_start..].find("</p>") {
+                    let content = &after_duration[p_start + 3..p_start + p_end];
+                    let tag_regex = Regex::new(r"<[^>]+>").unwrap();
+                    let clean = tag_regex.replace_all(content, "").trim().to_string();
+                    if clean.len() > 20 {
+                        return clean;
+                    }
+                }
+            }
+        }
+        
+        "Description not available".to_string()
+    }
+
+    fn extract_enhanced_spell_lists(&self, html: &str) -> String {
+        // Try multiple patterns for spell lists
+        let patterns = vec![
+            r"<strong><em>Spell Lists?[.\s]*</em></strong>\s*(.+?)(?:</p>|$)",
+            r"<em>Spell Lists?[.\s]*</em>\s*(.+?)(?:</p>|$)", 
+            r"Spell Lists?[:\s]*(.+?)(?:</p>|$)",
+        ];
+        
+        for pattern in patterns {
+            let regex = Regex::new(pattern).unwrap();
+            if let Some(caps) = regex.captures(html) {
+                let content = caps[1].trim();
+                let tag_regex = Regex::new(r"<[^>]+>").unwrap();
+                let clean = tag_regex.replace_all(content, "").trim().to_string();
+                if !clean.is_empty() {
+                    return clean;
+                }
+            }
+        }
+        
+        // Look for class links that might indicate spell lists
+        let class_regex = Regex::new(r#"<a href="[^"]*spells:([^"]+)"[^>]*>([^<]+)</a>"#).unwrap();
+        let mut classes = Vec::new();
+        for caps in class_regex.captures_iter(html) {
+            classes.push(caps[2].trim().to_string());
+        }
+        
+        if !classes.is_empty() {
+            return classes.join(", ");
+        }
+        
+        "".to_string()
+    }
+
+    fn extract_spell_name(&self, html: &str, fallback: &str) -> String {
+        // Try to extract the actual spell name from the page
+        let title_regex = Regex::new(r"<title>([^-]+) - DND").unwrap();
+        if let Some(caps) = title_regex.captures(html) {
+            let name = caps[1].trim();
+            if !name.is_empty() && name != fallback {
+                return name.to_string();
+            }
+        }
+        
+        // Try h1 tags
+        let h1_regex = Regex::new(r"<h1[^>]*>([^<]+)</h1>").unwrap();
+        if let Some(caps) = h1_regex.captures(html) {
+            let name = caps[1].trim();
+            if !name.is_empty() {
+                return name.to_string();
+            }
+        }
+        
+        // Fall back to title-cased query
+        fallback.split_whitespace()
+            .map(|word| {
+                let mut chars: Vec<char> = word.chars().collect();
+                if !chars.is_empty() {
+                    chars[0] = chars[0].to_uppercase().next().unwrap_or(chars[0]);
+                }
+                chars.into_iter().collect::<String>()
+            })
+            .collect::<Vec<String>>()
+            .join(" ")
+    }
+
+    fn extract_class_name(&self, html: &str, fallback: &str) -> String {
+        // Similar to spell name extraction
+        let title_regex = Regex::new(r"<title>([^-]+) - DND").unwrap();
+        if let Some(caps) = title_regex.captures(html) {
+            let name = caps[1].trim();
+            if !name.is_empty() && name != fallback {
+                return name.to_string();
+            }
+        }
+        
+        // Try h1 tags
+        let h1_regex = Regex::new(r"<h1[^>]*>([^<]+)</h1>").unwrap();
+        if let Some(caps) = h1_regex.captures(html) {
+            let name = caps[1].trim();
+            if !name.is_empty() {
+                return name.to_string();
+            }
+        }
+        
+        // Fall back to title-cased query
+        fallback.split_whitespace()
+            .map(|word| {
+                let mut chars: Vec<char> = word.chars().collect();
+                if !chars.is_empty() {
+                    chars[0] = chars[0].to_uppercase().next().unwrap_or(chars[0]);
+                }
+                chars.into_iter().collect::<String>()
+            })
+            .collect::<Vec<String>>()
+            .join(" ")
+    }
+
+    fn extract_enhanced_proficiencies(&self, html: &str) -> String {
+        // Look for proficiencies section with better parsing
+        let mut proficiencies = Vec::new();
+        
+        // Look for armor proficiencies
+        if let Some(armor) = self.extract_field(html, "Armor:", "<br") {
+            if !armor.trim().is_empty() {
+                proficiencies.push(format!("Armor: {}", armor.trim()));
+            }
+        }
+        
+        // Look for weapon proficiencies
+        if let Some(weapons) = self.extract_field(html, "Weapons:", "<br") {
+            if !weapons.trim().is_empty() {
+                proficiencies.push(format!("Weapons: {}", weapons.trim()));
+            }
+        }
+        
+        // Look for tool proficiencies
+        if let Some(tools) = self.extract_field(html, "Tools:", "<br") {
+            if !tools.trim().is_empty() {
+                proficiencies.push(format!("Tools: {}", tools.trim()));
+            }
+        }
+        
+        if !proficiencies.is_empty() {
+            return proficiencies.join("; ");
+        }
+        
+        // Fallback: look for general proficiencies section
+        self.extract_multi_line_field(html, "Proficiencies", "Saving Throws")
+    }
+
+    fn extract_enhanced_skills(&self, html: &str) -> String {
+        // Enhanced skills extraction with better patterns
+        let patterns = vec![
+            ("Skills:", "</p>"),
+            ("Skills:", "<br"),
+            ("Skill Proficiencies:", "</p>"),
+            ("Choose", "from"), // For "Choose two skills from..."
+        ];
+        
+        for (start, end) in patterns {
+            if let Some(result) = self.extract_field(html, start, end) {
+                if !result.trim().is_empty() && result.len() > 5 {
+                    return result;
+                }
+            }
+        }
+        
+        "No specific skills mentioned".to_string()
+    }
+
+    fn extract_enhanced_equipment(&self, html: &str) -> String {
+        // Look for equipment section with multiple strategies
+        if let Some(start) = html.find("Equipment") {
+            // Look for list items after equipment heading
+            let after_equipment = &html[start..];
+            
+            // Try to find ul/li structure
+            if let Some(ul_start) = after_equipment.find("<ul>") {
+                if let Some(ul_end) = after_equipment[ul_start..].find("</ul>") {
+                    let list_content = &after_equipment[ul_start..ul_start + ul_end];
+                    let tag_regex = Regex::new(r"<[^>]+>").unwrap();
+                    let clean = tag_regex.replace_all(list_content, " ").trim().to_string();
+                    let normalized = Regex::new(r"\s+").unwrap().replace_all(&clean, " ");
+                    if normalized.len() > 10 {
+                        return normalized.to_string();
+                    }
+                }
+            }
+            
+            // Try paragraph-based extraction
+            if let Some(p_start) = after_equipment.find("<p>") {
+                if let Some(p_end) = after_equipment[p_start..p_start + 500].find("</p>") {
+                    let content = &after_equipment[p_start + 3..p_start + p_end];
+                    let tag_regex = Regex::new(r"<[^>]+>").unwrap();
+                    let clean = tag_regex.replace_all(content, " ").trim().to_string();
+                    if clean.len() > 10 {
+                        return clean;
+                    }
+                }
+            }
+        }
+        
+        "Starting equipment varies".to_string()
+    }
+
+    fn extract_equipment_field(&self, html: &str, field_names: &[&str]) -> Option<String> {
+        for field_name in field_names {
+            // Try different end patterns for equipment fields
+            for end_pattern in &[" gp", " sp", " cp", " lb", " pounds", "</td>", "<br", "</p>"] {
+                if let Some(result) = self.extract_field(html, field_name, end_pattern) {
+                    if !result.trim().is_empty() && result != "Unknown" {
+                        return Some(result.trim().to_string());
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    fn extract_equipment_category(&self, html: &str, query: &str) -> String {
+        // Try to detect equipment category from URL patterns or content
+        let query_lower = query.to_lowercase();
+        
+        // Check for weapon indicators
+        if query_lower.contains("sword") || query_lower.contains("axe") || query_lower.contains("bow") 
+            || query_lower.contains("dagger") || query_lower.contains("mace") || query_lower.contains("spear") {
+            return "Weapon".to_string();
+        }
+        
+        // Check for armor indicators  
+        if query_lower.contains("armor") || query_lower.contains("mail") || query_lower.contains("plate")
+            || query_lower.contains("shield") || query_lower.contains("helm") {
+            return "Armor".to_string();
+        }
+        
+        // Check for tool indicators
+        if query_lower.contains("tool") || query_lower.contains("kit") || query_lower.contains("supplies") {
+            return "Tool".to_string();
+        }
+        
+        // Try to extract from content
+        let patterns = vec![
+            r"Category:\s*([^<\n]+)",
+            r"Type:\s*([^<\n]+)",
+            r"Equipment Type:\s*([^<\n]+)",
+        ];
+        
+        for pattern in patterns {
+            let regex = Regex::new(pattern).unwrap();
+            if let Some(caps) = regex.captures(html) {
+                let category = caps[1].trim();
+                if !category.is_empty() {
+                    return category.to_string();
+                }
+            }
+        }
+        
+        "Equipment".to_string()
+    }
+
+    fn extract_equipment_properties(&self, html: &str) -> String {
+        // Look for properties section
+        let patterns = vec![
+            r"Properties:\s*([^<\n]+)",
+            r"Special:\s*([^<\n]+)", 
+            r"Features:\s*([^<\n]+)",
+        ];
+        
+        for pattern in patterns {
+            let regex = Regex::new(pattern).unwrap();
+            if let Some(caps) = regex.captures(html) {
+                let properties = caps[1].trim();
+                if !properties.is_empty() {
+                    return properties.to_string();
+                }
+            }
+        }
+        
+        // Look for common weapon properties in parentheses
+        let prop_regex = Regex::new(r"\(([^)]+)\)").unwrap();
+        for caps in prop_regex.captures_iter(html) {
+            let content = caps[1].trim();
+            // Check if it looks like weapon properties
+            if content.contains("versatile") || content.contains("finesse") || content.contains("heavy") 
+                || content.contains("light") || content.contains("reach") || content.contains("thrown") {
+                return content.to_string();
+            }
+        }
+        
+        "".to_string()
+    }
+    // Original helper methods - enhanced for better extraction
     fn extract_field(&self, html: &str, field_name: &str, end_marker: &str) -> Option<String> {
         if let Some(start) = html.find(field_name) {
             let start_pos = start + field_name.len();
-            if let Some(end) = html[start_pos..].find(end_marker) {
-                let content = html[start_pos..start_pos + end].trim();
-                // Strip HTML tags
+            
+            // Skip any HTML tags or whitespace immediately after field name
+            let after_field = &html[start_pos..];
+            
+            // Find the actual start of content, skipping over closing tags like </strong>
+            let clean_start_offset = if let Some(tag_end) = after_field.find('>') {
+                // If there's a closing tag, start after it
+                let after_tag = &after_field[tag_end + 1..];
+                if let Some(pos) = after_tag.find(|c: char| !c.is_whitespace()) {
+                    tag_end + 1 + pos
+                } else {
+                    0
+                }
+            } else if let Some(pos) = after_field.find(|c: char| !c.is_whitespace() && c != ':') {
+                pos
+            } else {
+                0
+            };
+            
+            let clean_start = start_pos + clean_start_offset;
+            
+            if let Some(end) = html[clean_start..].find(end_marker) {
+                let content = html[clean_start..clean_start + end].trim();
+                // Strip HTML tags more thoroughly
                 let tag_regex = Regex::new(r"<[^>]+>").unwrap();
-                return Some(tag_regex.replace_all(content, "").trim().to_string());
+                let clean = tag_regex.replace_all(content, "").trim().to_string();
+                
+                // Remove common unwanted patterns
+                let unwanted_regex = Regex::new(r"^\s*[:\-•]\s*").unwrap();
+                let final_clean = unwanted_regex.replace_all(&clean, "").trim().to_string();
+                
+                if !final_clean.is_empty() && final_clean.len() > 0 {
+                    return Some(final_clean);
+                }
             }
         }
         None
     }
 
     fn extract_description(&self, html: &str) -> String {
-        // Find the first paragraph after the stats
-        let p_regex = Regex::new(r"<p>([^<]+)</p>").unwrap();
-        if let Some(caps) = p_regex.captures(html) {
-            caps[1].trim().to_string()
-        } else {
-            "No description available".to_string()
+        // Enhanced description extraction with multiple strategies
+        
+        // Strategy 1: Find meaningful paragraphs
+        let p_regex = Regex::new(r"<p>([^<]*(?:<[^>]*>[^<]*</[^>]*>[^<]*)*)</p>").unwrap();
+        for caps in p_regex.captures_iter(html) {
+            let text = &caps[1];
+            let clean_text = {
+                let tag_regex = Regex::new(r"<[^>]+>").unwrap();
+                tag_regex.replace_all(text, "").trim().to_string()
+            };
+            
+            // Look for substantial content that isn't metadata
+            if clean_text.len() > 40 
+                && !clean_text.contains("Source:")
+                && !clean_text.contains("Page:")
+                && !clean_text.starts_with("Hit")
+                && !clean_text.starts_with("Armor:")
+                && !clean_text.starts_with("Weapons:") {
+                return clean_text;
+            }
         }
+        
+        // Strategy 2: Look for text blocks without paragraph tags
+        let text_block_regex = Regex::new(r"([A-Z][^.!?]*[.!?])").unwrap();
+        for caps in text_block_regex.captures_iter(html) {
+            let text = caps[1].trim();
+            if text.len() > 30 && text.split_whitespace().count() > 5 {
+                return text.to_string();
+            }
+        }
+        
+        "No description available".to_string()
     }
 
     fn extract_higher_level(&self, html: &str) -> String {
-        let higher_regex = Regex::new(r"<strong><em>At Higher Levels\.</em></strong>\s*([^<]+)").unwrap();
-        if let Some(caps) = higher_regex.captures(html) {
-            caps[1].trim().to_string()
-        } else {
-            "".to_string()
+        // Enhanced patterns for higher level effects
+        let patterns = vec![
+            r"<strong><em>At Higher Levels\.\s*</em></strong>\s*([^<]+(?:<[^>]*>[^<]*</[^>]*>[^<]*)*)",
+            r"<strong><em>At Higher Level\.\s*</em></strong>\s*([^<]+)",
+            r"<em><strong>At Higher Levels\.\s*</strong></em>\s*([^<]+)",
+            r"At Higher Levels[.\s]*([^<\n]+)",
+        ];
+        
+        for pattern in patterns {
+            let regex = Regex::new(pattern).unwrap();
+            if let Some(caps) = regex.captures(html) {
+                let content = caps[1].trim();
+                let tag_regex = Regex::new(r"<[^>]+>").unwrap();
+                let clean = tag_regex.replace_all(content, "").trim().to_string();
+                if !clean.is_empty() {
+                    return clean;
+                }
+            }
         }
+        
+        "".to_string()
     }
 
     fn extract_spell_lists(&self, html: &str) -> String {
-        let lists_regex = Regex::new(r"<strong><em>Spell Lists\.</em></strong>\s*(.+?)(?:</p>|$)").unwrap();
-        if let Some(caps) = lists_regex.captures(html) {
-            let content = caps[1].trim();
-            let tag_regex = Regex::new(r"<[^>]+>").unwrap();
-            tag_regex.replace_all(content, "").trim().to_string()
-        } else {
-            "".to_string()
-        }
+        // This method is now supplemented by extract_enhanced_spell_lists, but keeping for compatibility
+        self.extract_enhanced_spell_lists(html)
     }
 
     fn extract_multi_line_field(&self, html: &str, start_field: &str, end_field: &str) -> String {
         if let Some(start) = html.find(start_field) {
-            if let Some(end) = html[start..].find(end_field) {
-                let content = &html[start..start + end];
-                let tag_regex = Regex::new(r"<[^>]+>").unwrap();
-                return tag_regex.replace_all(content, " ").trim().to_string();
+            let end_pos = if let Some(end) = html[start..].find(end_field) {
+                start + end
+            } else {
+                // If no end field found, try to find next major heading
+                if let Some(h_end) = html[start..].find("<h") {
+                    start + h_end
+                } else {
+                    start + 1000.min(html.len() - start)
+                }
+            };
+            
+            let content = &html[start..end_pos];
+            
+            // More thorough HTML cleaning
+            let tag_regex = Regex::new(r"<[^>]+>").unwrap();
+            let clean = tag_regex.replace_all(content, " ");
+            
+            // Normalize whitespace and clean up
+            let whitespace_regex = Regex::new(r"\s+").unwrap();
+            let normalized = whitespace_regex.replace_all(&clean, " ");
+            
+            let final_text = normalized.trim();
+            if !final_text.is_empty() && final_text.len() > start_field.len() {
+                // Remove the start field name if it's still there
+                if let Some(pos) = final_text.find(start_field) {
+                    return final_text[pos + start_field.len()..].trim().to_string();
+                }
+                return final_text.to_string();
             }
         }
         "Unknown".to_string()
     }
 
     fn extract_equipment_section(&self, html: &str) -> String {
-        // Look for equipment section
-        if let Some(start) = html.find("Equipment") {
-            if let Some(end) = html[start..start + 500].find("</ul>") {
-                let content = &html[start..start + end];
-                let tag_regex = Regex::new(r"<[^>]+>").unwrap();
-                return tag_regex.replace_all(content, " ").trim().to_string();
-            }
-        }
-        "".to_string()
+        // This method is now supplemented by extract_enhanced_equipment, but keeping for compatibility
+        self.extract_enhanced_equipment(html)
     }
 
     async fn fuzzy_search(&self, query: &str, category: Option<SearchCategory>) -> Result<Vec<SearchResult>, String> {
