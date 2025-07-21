@@ -1,4 +1,5 @@
 use std::io::{self, Write};
+use crate::search::{DndSearchClient, SearchCategory, SearchResult};
 
 mod character;
 mod file_manager;
@@ -10,6 +11,7 @@ mod error_handling;
 mod combat;
 mod tests;
 mod races_classes;
+mod search;
 
 fn clear_console() {
     print!("\x1B[2J\x1B[1;1H");
@@ -95,6 +97,7 @@ fn tools_menu() {
         println!("2. NPC randomizer");
         println!("3. Dice");
         println!("4. Combat tracker");
+        println!("5. Search D&D 5e API");
         println!("0. Back to main menu");
         
         let mut buffer = String::new();
@@ -108,6 +111,7 @@ fn tools_menu() {
             "2" => npc_randomizer_mode(),
             "3" => roll_dice_mode(),
             "4" => combat_tracker_mode(),
+            "5" => search_mode(),
             "0" => break,
             _ => println!("Invalid input"),
         }
@@ -933,4 +937,233 @@ fn handle_insert_combatant(combat_tracker: &mut CombatTracker, name: &str) {
     }
     
     combat_tracker.display_initiative_order();
+}
+
+fn search_mode() {
+    println!("\n🔍 D&D 5e API Search Tool 🔍");
+    println!("═══════════════════════════════════════════════════════════");
+    println!("Search for spells, classes, equipment, monsters, and races");
+    println!("Note: Limited network access - using offline cache as fallback");
+    println!("═══════════════════════════════════════════════════════════");
+    
+    // Create runtime for async operations
+    let rt = match tokio::runtime::Runtime::new() {
+        Ok(runtime) => runtime,
+        Err(e) => {
+            println!("❌ Failed to create async runtime: {}", e);
+            println!("Search functionality unavailable.");
+            return;
+        }
+    };
+    
+    let client = DndSearchClient::new();
+    
+    if client.is_offline() {
+        println!("🔄 Running in offline mode - using cached data");
+    } else {
+        println!("🌐 Online mode - will attempt to fetch from D&D 5e API");
+    }
+    
+    loop {
+        println!("\n--- Search Menu ---");
+        println!("Commands:");
+        println!("  search <query> - Search all categories");
+        println!("  search <category> <query> - Search specific category");
+        println!("  categories - List available categories");
+        println!("  help - Show detailed help");
+        println!("  back - Return to tools menu");
+        println!();
+        print!("Search > ");
+        io::stdout().flush().unwrap_or(());
+        
+        let mut input = String::new();
+        if io::stdin().read_line(&mut input).is_err() {
+            println!("Failed to read input");
+            continue;
+        }
+        
+        let input = input.trim();
+        if input.is_empty() {
+            continue;
+        }
+        
+        let parts: Vec<&str> = input.split_whitespace().collect();
+        let command = parts[0].to_lowercase();
+        
+        match command.as_str() {
+            "search" => {
+                if parts.len() < 2 {
+                    println!("Usage: search <query> or search <category> <query>");
+                    continue;
+                }
+                
+                let (category, query) = if parts.len() == 2 {
+                    // search <query>
+                    (None, parts[1].to_string())
+                } else {
+                    // search <category> <query>
+                    let potential_category = SearchCategory::from_str(parts[1]);
+                    if potential_category.is_some() {
+                        (potential_category, parts[2..].join(" "))
+                    } else {
+                        // Treat first argument as part of query
+                        (None, parts[1..].join(" "))
+                    }
+                };
+                
+                rt.block_on(async {
+                    handle_search_command(&client, &query, category).await;
+                });
+            },
+            "categories" => {
+                println!("\nAvailable Categories:");
+                println!("  • spells - Magic spells");
+                println!("  • classes - Character classes");
+                println!("  • equipment (or items/gear) - Weapons, armor, and gear");
+                println!("  • monsters (or creatures) - Monsters and NPCs");
+                println!("  • races - Character races");
+                println!("\nExample usage:");
+                println!("  search fireball");
+                println!("  search spell fireball");
+                println!("  search equipment longsword");
+            },
+            "help" => {
+                show_search_help();
+            },
+            "back" => {
+                println!("Returning to tools menu...");
+                break;
+            },
+            _ => {
+                // Try to interpret the entire input as a search query
+                rt.block_on(async {
+                    handle_search_command(&client, input, None).await;
+                });
+            }
+        }
+    }
+}
+
+async fn handle_search_command(client: &DndSearchClient, query: &str, category: Option<SearchCategory>) {
+    println!("🔍 Searching for '{}'...", query);
+    
+    match client.search(query, category).await {
+        Ok(results) => {
+            if results.is_empty() {
+                // No exact match found, get suggestions
+                let suggestions = client.get_suggestions(query, category).await;
+                
+                if suggestions.is_empty() {
+                    println!("❌ No results found for '{}'", query);
+                    if let Some(cat) = category {
+                        println!("💡 Try searching in a different category or check your spelling");
+                    } else {
+                        println!("💡 Try specifying a category: search <category> <query>");
+                        println!("   Example: search spell {}", query);
+                    }
+                } else {
+                    println!("❌ No exact match found for '{}'", query);
+                    println!("🔍 Did you mean one of these?");
+                    
+                    for (i, suggestion) in suggestions.iter().enumerate() {
+                        println!("  {}. {}", i + 1, suggestion);
+                    }
+                    
+                    println!("\nEnter the number of your choice (1-{}), or press Enter to skip:", suggestions.len());
+                    let mut choice_input = String::new();
+                    if io::stdin().read_line(&mut choice_input).is_ok() {
+                        let choice_input = choice_input.trim();
+                        if !choice_input.is_empty() {
+                            if let Ok(choice) = choice_input.parse::<usize>() {
+                                if choice > 0 && choice <= suggestions.len() {
+                                    let selected = &suggestions[choice - 1];
+                                    println!("🔍 Searching for '{}'...", selected);
+                                    
+                                    // Search again with the selected suggestion
+                                    match client.search(selected, category).await {
+                                        Ok(suggestion_results) => {
+                                            display_search_results(&suggestion_results);
+                                        },
+                                        Err(e) => {
+                                            println!("❌ Error searching for suggestion: {}", e);
+                                        }
+                                    }
+                                } else {
+                                    println!("Invalid choice.");
+                                }
+                            } else {
+                                println!("Invalid input.");
+                            }
+                        }
+                    }
+                }
+            } else {
+                display_search_results(&results);
+            }
+        },
+        Err(e) => {
+            println!("❌ Search failed: {}", e);
+            println!("💡 This might be due to network issues. The search will fall back to cached data.");
+        }
+    }
+}
+
+fn display_search_results(results: &[SearchResult]) {
+    println!("✅ Found {} result(s):", results.len());
+    
+    for (i, result) in results.iter().enumerate() {
+        if results.len() > 1 {
+            println!("\n--- Result {} ---", i + 1);
+        }
+        result.display();
+    }
+    
+    if results.len() > 1 {
+        println!("\n📋 Summary:");
+        for (i, result) in results.iter().enumerate() {
+            println!("  {}. {} ({})", i + 1, result.name(), result.index());
+        }
+    }
+    
+    println!("\nPress Enter to continue...");
+    let mut _buffer = String::new();
+    let _ = io::stdin().read_line(&mut _buffer);
+}
+
+fn show_search_help() {
+    println!("\n📖 D&D 5e API Search Help 📖");
+    println!("═══════════════════════════════════════════════════════════");
+    println!();
+    println!("BASIC USAGE:");
+    println!("  search <query>              - Search all categories");
+    println!("  search <category> <query>   - Search specific category");
+    println!();
+    println!("CATEGORIES:");
+    println!("  spells      - Magic spells (e.g., fireball, cure wounds)");
+    println!("  classes     - Character classes (e.g., fighter, wizard)");
+    println!("  equipment   - Items, weapons, armor (e.g., longsword, leather armor)");
+    println!("  monsters    - Creatures and NPCs (e.g., goblin, dragon)");
+    println!("  races       - Character races (e.g., elf, dwarf)");
+    println!();
+    println!("EXAMPLES:");
+    println!("  search fireball");
+    println!("  search spell magic missile");
+    println!("  search class paladin");
+    println!("  search equipment chain mail");
+    println!("  search monster troll");
+    println!("  search race halfling");
+    println!();
+    println!("FEATURES:");
+    println!("  • Exact match search with detailed information");
+    println!("  • Fuzzy matching when exact matches aren't found");
+    println!("  • Smart suggestions with 'Did you mean..?' prompts");
+    println!("  • Offline fallback using cached common D&D data");
+    println!("  • Case-insensitive search");
+    println!();
+    println!("NETWORK:");
+    println!("  The tool attempts to fetch data from the D&D 5e API online.");
+    println!("  If network access is limited, it falls back to cached data");
+    println!("  containing common spells, classes, equipment, and more.");
+    println!();
+    println!("═══════════════════════════════════════════════════════════");
 }
