@@ -955,10 +955,10 @@ fn handle_insert_combatant(combat_tracker: &mut CombatTracker, name: &str) {
 }
 
 fn search_mode() {
-    println!("\n🔍 D&D 5e API Search Tool 🔍");
+    println!("\n🔍 D&D 5e Wikidot Search Tool 🔍");
     println!("═══════════════════════════════════════════════════════════");
     println!("Search for spells, classes, equipment, monsters, and races");
-    println!("Note: Limited network access - using offline cache as fallback");
+    println!("Powered by http://dnd5e.wikidot.com - Live data from the web!");
     println!("═══════════════════════════════════════════════════════════");
     
     // Create runtime for async operations
@@ -973,11 +973,7 @@ fn search_mode() {
     
     let client = DndSearchClient::new();
     
-    if client.is_offline() {
-        println!("🔄 Running in offline mode - using cached data");
-    } else {
-        println!("🌐 Online mode - will attempt to fetch from D&D 5e API");
-    }
+    println!("🌐 Online mode - connecting to Wikidot D&D 5e site");
     
     // Test network connectivity
     println!("🔄 Testing API connectivity...");
@@ -1254,7 +1250,7 @@ fn interactive_field_mode(result: &SearchResult) {
 }
 
 fn show_search_help() {
-    println!("\n📖 D&D 5e API Search Help 📖");
+    println!("\n📖 D&D 5e Wikidot Search Help 📖");
     println!("═══════════════════════════════════════════════════════════");
     println!();
     println!("BASIC USAGE:");
@@ -1277,30 +1273,24 @@ fn show_search_help() {
     println!("  search race halfling");
     println!();
     println!("FEATURES:");
-    println!("  • Exact match search with detailed information");
+    println!("  • Live data fetching from dnd5e.wikidot.com");
+    println!("  • Detailed spell, class, and equipment information");
     println!("  • Interactive field querying for detailed data exploration");
-    println!("  • Fuzzy matching when exact matches aren't found");
-    println!("  • Smart suggestions with 'Did you mean..?' prompts");
-    println!("  • Offline fallback using cached common D&D data");
-    println!("  • Case-insensitive search");
+    println!("  • Smart query variations for better match finding");
+    println!("  • Case-insensitive search with flexible input parsing");
     println!("  • Universal EXIT command works from any prompt");
     println!();
     println!("NETWORK:");
-    println!("  The tool attempts to fetch data from the D&D 5e API online.");
-    println!("  If network access is limited, it falls back to cached data");
-    println!("  containing common spells, classes, equipment, and more.");
+    println!("  The tool fetches live data from the D&D 5e Wikidot community site.");
+    println!("  Internet connection is required for search functionality.");
+    println!("  All content is sourced from the community-maintained wiki.");
     println!();
     println!("═══════════════════════════════════════════════════════════");
 }
 
 async fn test_api_connectivity(client: &DndSearchClient) {
-    if client.is_offline() {
-        println!("⚡ Client is in offline mode - skipping network test");
-        return;
-    }
-    
-    // Test a simple API endpoint
-    let test_url = "https://www.dnd5eapi.co/api/2014/spells";
+    // Test basic connectivity to Wikidot
+    let test_url = "http://dnd5e.wikidot.com/spell:fireball";
     
     match reqwest::Client::new()
         .get(test_url)
@@ -1310,17 +1300,16 @@ async fn test_api_connectivity(client: &DndSearchClient) {
     {
         Ok(response) => {
             if response.status().is_success() {
-                println!("✅ API connectivity test successful! Online features available.");
+                println!("✅ Wikidot connectivity test successful! Online features available.");
             } else {
-                println!("⚠️ API responded but with status: {} - limited online functionality", response.status());
+                println!("⚠️ Wikidot responded but with status: {} - limited online functionality", response.status());
             }
         },
         Err(e) => {
-            println!("❌ API connectivity test failed: {}", e);
-            println!("🔄 Will use offline cache as fallback");
+            println!("❌ Wikidot connectivity test failed: {}", e);
             
             if e.is_timeout() {
-                println!("💡 Timeout error - the API might be slow or unreachable");
+                println!("💡 Timeout error - the site might be slow or unreachable");
             } else if e.is_connect() {
                 println!("💡 Connection error - check network connectivity");
             } else if e.is_request() {

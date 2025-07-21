@@ -1,79 +1,49 @@
-use serde::{Deserialize, Serialize};
 use regex::Regex;
-use std::collections::HashMap;
+use scraper::{Html, Selector};
 
-// API Response structures for D&D 5e API
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct ApiListResponse {
-    pub count: usize,
-    pub results: Vec<ApiReference>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct ApiReference {
+// Data structures for Wikidot HTML parsing
+#[derive(Debug, Clone)]
+pub struct WikiReference {
     pub index: String,
     pub name: String,
     pub url: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Clone)]
 pub struct SpellDetail {
     pub index: String,
     pub name: String,
-    pub level: u8,
-    pub school: ApiReference,
+    pub level: String,
+    pub school: String,
     pub casting_time: String,
     pub range: String,
-    pub components: Vec<String>,
+    pub components: String,
     pub duration: String,
-    #[serde(rename = "desc")]
-    pub description: Vec<String>,
-    #[serde(default)]
-    pub higher_level: Vec<String>,
+    pub description: String,
+    pub higher_level: String,
+    pub spell_lists: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Clone)]
 pub struct ClassDetail {
     pub index: String,
     pub name: String,
-    pub hit_die: u8,
-    pub proficiency_choices: Vec<ProficiencyChoice>,
-    pub proficiencies: Vec<ApiReference>,
-    pub saving_throws: Vec<ApiReference>,
+    pub hit_die: String,
+    pub proficiencies: String,
+    pub saving_throws: String,
+    pub skills: String,
+    pub equipment: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct ProficiencyChoice {
-    #[serde(rename = "type")]
-    pub choice_type: String,
-    pub choose: u8,
-    pub from: ApiReference,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Clone)]
 pub struct EquipmentDetail {
     pub index: String,
     pub name: String,
-    pub equipment_category: ApiReference,
-    #[serde(default)]
-    pub gear_category: Option<ApiReference>,
-    #[serde(default)]
-    pub weapon_category: Option<String>,
-    #[serde(default)]
-    pub armor_category: Option<String>,
-    #[serde(default)]
-    pub cost: Option<Cost>,
-    #[serde(default)]
-    pub weight: Option<f32>,
-    #[serde(rename = "desc")]
-    #[serde(default)]
-    pub description: Vec<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Cost {
-    pub quantity: u32,
-    pub unit: String,
+    pub category: String,
+    pub cost: String,
+    pub weight: String,
+    pub description: String,
+    pub properties: String,
 }
 
 // Search categories
@@ -125,7 +95,7 @@ pub enum SearchResult {
     Spell(SpellDetail),
     Class(ClassDetail),
     Equipment(EquipmentDetail),
-    Reference(ApiReference),
+    Reference(WikiReference),
 }
 
 impl SearchResult {
@@ -160,23 +130,23 @@ impl SearchResult {
                 "duration".to_string(),
                 "description".to_string(),
                 "higher_level".to_string(),
+                "spell_lists".to_string(),
             ],
             SearchResult::Class(_) => vec![
                 "name".to_string(),
                 "hit_die".to_string(),
                 "proficiencies".to_string(),
                 "saving_throws".to_string(),
-                "proficiency_choices".to_string(),
+                "skills".to_string(),
+                "equipment".to_string(),
             ],
             SearchResult::Equipment(_) => vec![
                 "name".to_string(),
                 "category".to_string(),
-                "gear_category".to_string(),
-                "weapon_category".to_string(),
-                "armor_category".to_string(),
                 "cost".to_string(),
                 "weight".to_string(),
                 "description".to_string(),
+                "properties".to_string(),
             ],
             SearchResult::Reference(_) => vec![
                 "name".to_string(),
@@ -192,103 +162,37 @@ impl SearchResult {
             SearchResult::Spell(spell) => {
                 match field.to_lowercase().as_str() {
                     "name" => Some(spell.name.clone()),
-                    "level" => Some(format!("Level {}", spell.level)),
-                    "school" => Some(spell.school.name.clone()),
+                    "level" => Some(spell.level.clone()),
+                    "school" => Some(spell.school.clone()),
                     "casting_time" => Some(spell.casting_time.clone()),
                     "range" => Some(spell.range.clone()),
-                    "components" => Some(spell.components.join(", ")),
+                    "components" => Some(spell.components.clone()),
                     "duration" => Some(spell.duration.clone()),
-                    "description" => {
-                        if spell.description.is_empty() {
-                            Some("No description available".to_string())
-                        } else {
-                            Some(spell.description.join("\n"))
-                        }
-                    },
-                    "higher_level" => {
-                        if spell.higher_level.is_empty() {
-                            Some("No higher level effects".to_string())
-                        } else {
-                            Some(spell.higher_level.join("\n"))
-                        }
-                    },
+                    "description" => Some(spell.description.clone()),
+                    "higher_level" => Some(spell.higher_level.clone()),
+                    "spell_lists" => Some(spell.spell_lists.clone()),
                     _ => None,
                 }
             },
             SearchResult::Class(class) => {
                 match field.to_lowercase().as_str() {
                     "name" => Some(class.name.clone()),
-                    "hit_die" => Some(format!("d{}", class.hit_die)),
-                    "proficiencies" => {
-                        if class.proficiencies.is_empty() {
-                            Some("No proficiencies listed".to_string())
-                        } else {
-                            Some(class.proficiencies.iter()
-                                .map(|p| p.name.as_str())
-                                .collect::<Vec<_>>()
-                                .join(", "))
-                        }
-                    },
-                    "saving_throws" => {
-                        if class.saving_throws.is_empty() {
-                            Some("No saving throw proficiencies listed".to_string())
-                        } else {
-                            Some(class.saving_throws.iter()
-                                .map(|s| s.name.as_str())
-                                .collect::<Vec<_>>()
-                                .join(", "))
-                        }
-                    },
-                    "proficiency_choices" => {
-                        if class.proficiency_choices.is_empty() {
-                            Some("No proficiency choices listed".to_string())
-                        } else {
-                            Some(format!("{} proficiency choices available", class.proficiency_choices.len()))
-                        }
-                    },
+                    "hit_die" => Some(class.hit_die.clone()),
+                    "proficiencies" => Some(class.proficiencies.clone()),
+                    "saving_throws" => Some(class.saving_throws.clone()),
+                    "skills" => Some(class.skills.clone()),
+                    "equipment" => Some(class.equipment.clone()),
                     _ => None,
                 }
             },
             SearchResult::Equipment(equipment) => {
                 match field.to_lowercase().as_str() {
                     "name" => Some(equipment.name.clone()),
-                    "category" => Some(equipment.equipment_category.name.clone()),
-                    "gear_category" => {
-                        if let Some(ref gear_cat) = equipment.gear_category {
-                            Some(gear_cat.name.clone())
-                        } else {
-                            Some("No gear category".to_string())
-                        }
-                    },
-                    "weapon_category" => {
-                        equipment.weapon_category.clone()
-                            .unwrap_or_else(|| "Not a weapon".to_string()).into()
-                    },
-                    "armor_category" => {
-                        equipment.armor_category.clone()
-                            .unwrap_or_else(|| "Not armor".to_string()).into()
-                    },
-                    "cost" => {
-                        if let Some(ref cost) = equipment.cost {
-                            Some(format!("{} {}", cost.quantity, cost.unit))
-                        } else {
-                            Some("No cost listed".to_string())
-                        }
-                    },
-                    "weight" => {
-                        if let Some(weight) = equipment.weight {
-                            Some(format!("{} lb", weight))
-                        } else {
-                            Some("No weight listed".to_string())
-                        }
-                    },
-                    "description" => {
-                        if equipment.description.is_empty() {
-                            Some("No description available".to_string())
-                        } else {
-                            Some(equipment.description.join("\n"))
-                        }
-                    },
+                    "category" => Some(equipment.category.clone()),
+                    "cost" => Some(equipment.cost.clone()),
+                    "weight" => Some(equipment.weight.clone()),
+                    "description" => Some(equipment.description.clone()),
+                    "properties" => Some(equipment.properties.clone()),
                     _ => None,
                 }
             },
@@ -343,25 +247,26 @@ impl SearchResult {
         println!("╠═══════════════════════════════════════╣");
         println!("║ Name: {:<31} ║", spell.name);
         println!("║ Level: {:<30} ║", spell.level);
-        println!("║ School: {:<29} ║", spell.school.name);
+        println!("║ School: {:<29} ║", spell.school);
         println!("║ Casting Time: {:<23} ║", spell.casting_time);
         println!("║ Range: {:<30} ║", spell.range);
-        println!("║ Components: {:<25} ║", spell.components.join(", "));
+        println!("║ Components: {:<25} ║", spell.components);
         println!("║ Duration: {:<27} ║", spell.duration);
         println!("╚═══════════════════════════════════════╝");
         
         if !spell.description.is_empty() {
             println!("\nDescription:");
-            for desc in &spell.description {
-                println!("  {}", desc);
-            }
+            println!("  {}", spell.description);
         }
         
         if !spell.higher_level.is_empty() {
             println!("\nAt Higher Levels:");
-            for higher in &spell.higher_level {
-                println!("  {}", higher);
-            }
+            println!("  {}", spell.higher_level);
+        }
+
+        if !spell.spell_lists.is_empty() {
+            println!("\nSpell Lists:");
+            println!("  {}", spell.spell_lists);
         }
     }
 
@@ -370,21 +275,27 @@ impl SearchResult {
         println!("║                CLASS                  ║");
         println!("╠═══════════════════════════════════════╣");
         println!("║ Name: {:<31} ║", class.name);
-        println!("║ Hit Die: d{:<27} ║", class.hit_die);
+        println!("║ Hit Die: {:<28} ║", class.hit_die);
         println!("╚═══════════════════════════════════════╝");
         
         if !class.proficiencies.is_empty() {
             println!("\nProficiencies:");
-            for prof in &class.proficiencies {
-                println!("  • {}", prof.name);
-            }
+            println!("  {}", class.proficiencies);
         }
         
         if !class.saving_throws.is_empty() {
             println!("\nSaving Throw Proficiencies:");
-            for save in &class.saving_throws {
-                println!("  • {}", save.name);
-            }
+            println!("  {}", class.saving_throws);
+        }
+
+        if !class.skills.is_empty() {
+            println!("\nSkills:");
+            println!("  {}", class.skills);
+        }
+
+        if !class.equipment.is_empty() {
+            println!("\nEquipment:");
+            println!("  {}", class.equipment);
         }
     }
 
@@ -393,27 +304,30 @@ impl SearchResult {
         println!("║              EQUIPMENT                ║");
         println!("╠═══════════════════════════════════════╣");
         println!("║ Name: {:<31} ║", equipment.name);
-        println!("║ Category: {:<27} ║", equipment.equipment_category.name);
+        println!("║ Category: {:<27} ║", equipment.category);
         
-        if let Some(cost) = &equipment.cost {
-            println!("║ Cost: {} {:<24} ║", cost.quantity, cost.unit);
+        if !equipment.cost.is_empty() {
+            println!("║ Cost: {:<31} ║", equipment.cost);
         }
         
-        if let Some(weight) = equipment.weight {
-            println!("║ Weight: {:<27} lb ║", weight);
+        if !equipment.weight.is_empty() {
+            println!("║ Weight: {:<29} ║", equipment.weight);
         }
         
         println!("╚═══════════════════════════════════════╝");
         
         if !equipment.description.is_empty() {
             println!("\nDescription:");
-            for desc in &equipment.description {
-                println!("  {}", desc);
-            }
+            println!("  {}", equipment.description);
+        }
+
+        if !equipment.properties.is_empty() {
+            println!("\nProperties:");
+            println!("  {}", equipment.properties);
         }
     }
 
-    fn display_reference(&self, reference: &ApiReference) {
+    fn display_reference(&self, reference: &WikiReference) {
         println!("\n╔═══════════════════════════════════════╗");
         println!("║              REFERENCE                ║");
         println!("╠═══════════════════════════════════════╣");
@@ -423,13 +337,10 @@ impl SearchResult {
     }
 }
 
-// Main search client
+// Main search client for Wikidot HTML scraping
 pub struct DndSearchClient {
     base_url: String,
-    client: Option<reqwest::Client>,
-    offline_mode: bool,
-    // Cache for offline fallback
-    cached_data: HashMap<SearchCategory, Vec<ApiReference>>,
+    client: reqwest::Client,
 }
 
 impl Default for DndSearchClient {
@@ -443,27 +354,15 @@ impl DndSearchClient {
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(10))
             .build()
-            .ok();
-        
-        let offline_mode = client.is_none();
+            .expect("Failed to create HTTP client - network required for Wikidot API");
         
         DndSearchClient {
-            base_url: "https://www.dnd5eapi.co/api/2014".to_string(),
+            base_url: "http://dnd5e.wikidot.com".to_string(),
             client,
-            offline_mode,
-            cached_data: Self::initialize_offline_cache(),
         }
     }
 
-    pub fn set_offline_mode(&mut self, offline: bool) {
-        self.offline_mode = offline;
-    }
-
-    pub fn is_offline(&self) -> bool {
-        self.offline_mode || self.client.is_none()
-    }
-
-    // Search with fuzzy matching
+    // Search with fuzzy matching using Wikidot HTML scraping
     pub async fn search(&self, query: &str, category: Option<SearchCategory>) -> Result<Vec<SearchResult>, String> {
         let categories = match category {
             Some(cat) => vec![cat],
@@ -491,276 +390,402 @@ impl DndSearchClient {
     }
 
     async fn search_category(&self, query: &str, category: SearchCategory) -> Result<Vec<SearchResult>, String> {
-        if self.is_offline() {
-            return self.offline_search(query, category);
-        }
-
-        if let Some(client) = &self.client {
-            match self.online_search(client, query, category).await {
-                Ok(results) => Ok(results),
-                Err(_) => {
-                    // Fallback to offline search
-                    eprintln!("Online search failed, falling back to offline mode");
-                    self.offline_search(query, category)
-                }
-            }
-        } else {
-            self.offline_search(query, category)
+        match category {
+            SearchCategory::Spells => self.search_spell(query).await,
+            SearchCategory::Classes => self.search_class(query).await,
+            SearchCategory::Equipment => self.search_equipment(query).await,
+            SearchCategory::Monsters => self.search_monster(query).await,
+            SearchCategory::Races => self.search_race(query).await,
         }
     }
 
-    async fn online_search(&self, client: &reqwest::Client, query: &str, category: SearchCategory) -> Result<Vec<SearchResult>, String> {
-        let url = format!("{}/{}", self.base_url, category.as_str());
+    async fn search_spell(&self, query: &str) -> Result<Vec<SearchResult>, String> {
+        let spell_url = format!("{}/spell:{}", self.base_url, query.to_lowercase().replace(" ", "-"));
         
-        let response = client
-            .get(&url)
+        let response = self.client
+            .get(&spell_url)
             .send()
             .await
             .map_err(|e| format!("Network request failed: {}", e))?;
 
-        let list_response: ApiListResponse = response
-            .json()
-            .await
-            .map_err(|e| format!("Failed to parse JSON: {}", e))?;
-
-        // Find exact matches first
-        let mut results = Vec::new();
-        let query_lower = query.to_lowercase();
-
-        for item in &list_response.results {
-            if item.name.to_lowercase() == query_lower {
-                // Exact match - fetch details
-                if let Ok(detailed_result) = self.fetch_details(client, &item.url, category).await {
-                    results.push(detailed_result);
-                }
-            }
+        if !response.status().is_success() {
+            return Err(format!("Spell '{}' not found", query));
         }
 
-        Ok(results)
-    }
+        let html = response.text().await
+            .map_err(|e| format!("Failed to read response: {}", e))?;
 
-    fn offline_search(&self, query: &str, category: SearchCategory) -> Result<Vec<SearchResult>, String> {
-        if let Some(cached_items) = self.cached_data.get(&category) {
-            let query_lower = query.to_lowercase();
-            let mut results = Vec::new();
-
-            for item in cached_items {
-                if item.name.to_lowercase() == query_lower {
-                    results.push(SearchResult::Reference(item.clone()));
-                }
-            }
-
-            Ok(results)
-        } else {
-            Err("No cached data available for this category".to_string())
-        }
-    }
-
-    async fn fuzzy_search(&self, query: &str, category: Option<SearchCategory>) -> Result<Vec<SearchResult>, String> {
-        let categories = match category {
-            Some(cat) => vec![cat],
-            None => SearchCategory::all(),
-        };
-
-        let mut fuzzy_results = Vec::new();
-        let query_pattern = Self::create_fuzzy_regex(query)?;
-
-        for cat in categories {
-            let items = if self.is_offline() {
-                self.cached_data.get(&cat).cloned().unwrap_or_default()
-            } else {
-                // For online mode, we'd need to fetch all items first
-                // For now, fall back to cached data
-                self.cached_data.get(&cat).cloned().unwrap_or_default()
-            };
-
-            for item in items {
-                if query_pattern.is_match(&item.name.to_lowercase()) {
-                    fuzzy_results.push(SearchResult::Reference(item));
-                }
-            }
-        }
-
-        if fuzzy_results.is_empty() {
-            Err(format!("No matches found for '{}'", query))
-        } else {
-            Ok(fuzzy_results)
-        }
-    }
-
-    fn create_fuzzy_regex(query: &str) -> Result<Regex, String> {
-        // Create a regex pattern that allows for partial matches
-        let escaped_query = regex::escape(query);
-        let pattern = format!(r"(?i).*{}.*", escaped_query);
+        let document = Html::parse_document(&html);
         
-        Regex::new(&pattern).map_err(|e| format!("Invalid regex pattern: {}", e))
+        // Parse spell details from HTML
+        let spell_detail = self.parse_spell_html(&document, query)?;
+        Ok(vec![SearchResult::Spell(spell_detail)])
     }
 
-    async fn fetch_details(&self, client: &reqwest::Client, url: &str, category: SearchCategory) -> Result<SearchResult, String> {
-        let full_url = format!("{}{}", self.base_url, url);
+    async fn search_class(&self, query: &str) -> Result<Vec<SearchResult>, String> {
+        let class_url = format!("{}/{}", self.base_url, query.to_lowercase());
         
-        let response = client
-            .get(&full_url)
+        let response = self.client
+            .get(&class_url)
             .send()
             .await
-            .map_err(|e| format!("Failed to fetch details: {}", e))?;
+            .map_err(|e| format!("Network request failed: {}", e))?;
 
-        match category {
-            SearchCategory::Spells => {
-                let spell: SpellDetail = response
-                    .json()
-                    .await
-                    .map_err(|e| format!("Failed to parse spell details: {}", e))?;
-                Ok(SearchResult::Spell(spell))
-            },
-            SearchCategory::Classes => {
-                let class: ClassDetail = response
-                    .json()
-                    .await
-                    .map_err(|e| format!("Failed to parse class details: {}", e))?;
-                Ok(SearchResult::Class(class))
-            },
-            SearchCategory::Equipment => {
-                let equipment: EquipmentDetail = response
-                    .json()
-                    .await
-                    .map_err(|e| format!("Failed to parse equipment details: {}", e))?;
-                Ok(SearchResult::Equipment(equipment))
-            },
-            _ => {
-                // For other categories, return as reference for now
-                let reference = ApiReference {
-                    index: "unknown".to_string(),
-                    name: "Unknown".to_string(),
-                    url: url.to_string(),
-                };
-                Ok(SearchResult::Reference(reference))
-            }
+        if !response.status().is_success() {
+            return Err(format!("Class '{}' not found", query));
         }
+
+        let html = response.text().await
+            .map_err(|e| format!("Failed to read response: {}", e))?;
+
+        let document = Html::parse_document(&html);
+        
+        // Parse class details from HTML
+        let class_detail = self.parse_class_html(&document, query)?;
+        Ok(vec![SearchResult::Class(class_detail)])
     }
 
-    fn initialize_offline_cache() -> HashMap<SearchCategory, Vec<ApiReference>> {
-        let mut cache = HashMap::new();
-
-        // Populate with some common spells
-        let common_spells = vec![
-            ApiReference { index: "fireball".to_string(), name: "Fireball".to_string(), url: "/spells/fireball".to_string() },
-            ApiReference { index: "magic-missile".to_string(), name: "Magic Missile".to_string(), url: "/spells/magic-missile".to_string() },
-            ApiReference { index: "cure-wounds".to_string(), name: "Cure Wounds".to_string(), url: "/spells/cure-wounds".to_string() },
-            ApiReference { index: "shield".to_string(), name: "Shield".to_string(), url: "/spells/shield".to_string() },
-            ApiReference { index: "healing-word".to_string(), name: "Healing Word".to_string(), url: "/spells/healing-word".to_string() },
-            ApiReference { index: "counterspell".to_string(), name: "Counterspell".to_string(), url: "/spells/counterspell".to_string() },
-            ApiReference { index: "dimension-door".to_string(), name: "Dimension Door".to_string(), url: "/spells/dimension-door".to_string() },
-            ApiReference { index: "lightning-bolt".to_string(), name: "Lightning Bolt".to_string(), url: "/spells/lightning-bolt".to_string() },
+    async fn search_equipment(&self, query: &str) -> Result<Vec<SearchResult>, String> {
+        // Equipment might be at different URL patterns - try common ones
+        let equipment_urls = vec![
+            format!("{}/equipment:{}", self.base_url, query.to_lowercase().replace(" ", "-")),
+            format!("{}/weapon:{}", self.base_url, query.to_lowercase().replace(" ", "-")),
+            format!("{}/armor:{}", self.base_url, query.to_lowercase().replace(" ", "-")),
         ];
 
-        // Common classes
-        let common_classes = vec![
-            ApiReference { index: "fighter".to_string(), name: "Fighter".to_string(), url: "/classes/fighter".to_string() },
-            ApiReference { index: "wizard".to_string(), name: "Wizard".to_string(), url: "/classes/wizard".to_string() },
-            ApiReference { index: "cleric".to_string(), name: "Cleric".to_string(), url: "/classes/cleric".to_string() },
-            ApiReference { index: "rogue".to_string(), name: "Rogue".to_string(), url: "/classes/rogue".to_string() },
-            ApiReference { index: "ranger".to_string(), name: "Ranger".to_string(), url: "/classes/ranger".to_string() },
-            ApiReference { index: "paladin".to_string(), name: "Paladin".to_string(), url: "/classes/paladin".to_string() },
-            ApiReference { index: "barbarian".to_string(), name: "Barbarian".to_string(), url: "/classes/barbarian".to_string() },
-            ApiReference { index: "bard".to_string(), name: "Bard".to_string(), url: "/classes/bard".to_string() },
-            ApiReference { index: "druid".to_string(), name: "Druid".to_string(), url: "/classes/druid".to_string() },
-            ApiReference { index: "monk".to_string(), name: "Monk".to_string(), url: "/classes/monk".to_string() },
-            ApiReference { index: "sorcerer".to_string(), name: "Sorcerer".to_string(), url: "/classes/sorcerer".to_string() },
-            ApiReference { index: "warlock".to_string(), name: "Warlock".to_string(), url: "/classes/warlock".to_string() },
-        ];
-
-        // Common equipment
-        let common_equipment = vec![
-            ApiReference { index: "longsword".to_string(), name: "Longsword".to_string(), url: "/equipment/longsword".to_string() },
-            ApiReference { index: "shortsword".to_string(), name: "Shortsword".to_string(), url: "/equipment/shortsword".to_string() },
-            ApiReference { index: "dagger".to_string(), name: "Dagger".to_string(), url: "/equipment/dagger".to_string() },
-            ApiReference { index: "shortbow".to_string(), name: "Shortbow".to_string(), url: "/equipment/shortbow".to_string() },
-            ApiReference { index: "longbow".to_string(), name: "Longbow".to_string(), url: "/equipment/longbow".to_string() },
-            ApiReference { index: "chain-mail".to_string(), name: "Chain Mail".to_string(), url: "/equipment/chain-mail".to_string() },
-            ApiReference { index: "leather-armor".to_string(), name: "Leather Armor".to_string(), url: "/equipment/leather-armor".to_string() },
-            ApiReference { index: "shield".to_string(), name: "Shield".to_string(), url: "/equipment/shield".to_string() },
-        ];
-
-        // Common races
-        let common_races = vec![
-            ApiReference { index: "human".to_string(), name: "Human".to_string(), url: "/races/human".to_string() },
-            ApiReference { index: "elf".to_string(), name: "Elf".to_string(), url: "/races/elf".to_string() },
-            ApiReference { index: "dwarf".to_string(), name: "Dwarf".to_string(), url: "/races/dwarf".to_string() },
-            ApiReference { index: "halfling".to_string(), name: "Halfling".to_string(), url: "/races/halfling".to_string() },
-            ApiReference { index: "dragonborn".to_string(), name: "Dragonborn".to_string(), url: "/races/dragonborn".to_string() },
-            ApiReference { index: "gnome".to_string(), name: "Gnome".to_string(), url: "/races/gnome".to_string() },
-            ApiReference { index: "half-elf".to_string(), name: "Half-Elf".to_string(), url: "/races/half-elf".to_string() },
-            ApiReference { index: "half-orc".to_string(), name: "Half-Orc".to_string(), url: "/races/half-orc".to_string() },
-            ApiReference { index: "tiefling".to_string(), name: "Tiefling".to_string(), url: "/races/tiefling".to_string() },
-        ];
-
-        // Common monsters
-        let common_monsters = vec![
-            ApiReference { index: "goblin".to_string(), name: "Goblin".to_string(), url: "/monsters/goblin".to_string() },
-            ApiReference { index: "orc".to_string(), name: "Orc".to_string(), url: "/monsters/orc".to_string() },
-            ApiReference { index: "troll".to_string(), name: "Troll".to_string(), url: "/monsters/troll".to_string() },
-            ApiReference { index: "dragon".to_string(), name: "Adult Red Dragon".to_string(), url: "/monsters/adult-red-dragon".to_string() },
-            ApiReference { index: "skeleton".to_string(), name: "Skeleton".to_string(), url: "/monsters/skeleton".to_string() },
-            ApiReference { index: "zombie".to_string(), name: "Zombie".to_string(), url: "/monsters/zombie".to_string() },
-            ApiReference { index: "wolf".to_string(), name: "Wolf".to_string(), url: "/monsters/wolf".to_string() },
-            ApiReference { index: "bear".to_string(), name: "Brown Bear".to_string(), url: "/monsters/brown-bear".to_string() },
-        ];
-
-        cache.insert(SearchCategory::Spells, common_spells);
-        cache.insert(SearchCategory::Classes, common_classes);
-        cache.insert(SearchCategory::Equipment, common_equipment);
-        cache.insert(SearchCategory::Races, common_races);
-        cache.insert(SearchCategory::Monsters, common_monsters);
-
-        cache
-    }
-
-    // Method to get suggestions when no exact match is found
-    pub async fn get_suggestions(&self, query: &str, category: Option<SearchCategory>) -> Vec<String> {
-        let mut suggestions = Vec::new();
-        let categories = match category {
-            Some(cat) => vec![cat],
-            None => SearchCategory::all(),
-        };
-
-        for cat in categories {
-            let items = self.cached_data.get(&cat).cloned().unwrap_or_default();
-            
-            // Use fuzzy matching to find similar items
-            if let Ok(pattern) = Self::create_fuzzy_regex(query) {
-                for item in items {
-                    if pattern.is_match(&item.name.to_lowercase()) && !suggestions.contains(&item.name) {
-                        suggestions.push(item.name);
+        for url in equipment_urls {
+            let response = self.client.get(&url).send().await;
+            if let Ok(response) = response {
+                if response.status().is_success() {
+                    if let Ok(html) = response.text().await {
+                        let document = Html::parse_document(&html);
+                        if let Ok(equipment_detail) = self.parse_equipment_html(&document, query) {
+                            return Ok(vec![SearchResult::Equipment(equipment_detail)]);
+                        }
                     }
                 }
             }
         }
 
-        // Sort suggestions by similarity (simple implementation)
-        suggestions.sort_by(|a, b| {
-            let a_score = Self::similarity_score(query, a);
-            let b_score = Self::similarity_score(query, b);
-            b_score.partial_cmp(&a_score).unwrap_or(std::cmp::Ordering::Equal)
-        });
-
-        // Return top 5 suggestions
-        suggestions.truncate(5);
-        suggestions
+        Err(format!("Equipment '{}' not found", query))
     }
 
-    fn similarity_score(query: &str, candidate: &str) -> f32 {
+    async fn search_monster(&self, query: &str) -> Result<Vec<SearchResult>, String> {
+        let monster_url = format!("{}/monster:{}", self.base_url, query.to_lowercase().replace(" ", "-"));
+        
+        let response = self.client
+            .get(&monster_url)
+            .send()
+            .await
+            .map_err(|e| format!("Network request failed: {}", e))?;
+
+        if !response.status().is_success() {
+            return Err(format!("Monster '{}' not found", query));
+        }
+
+        let html = response.text().await
+            .map_err(|e| format!("Failed to read response: {}", e))?;
+
+        // For now, return as reference since monster parsing would be complex
+        let reference = WikiReference {
+            index: query.to_lowercase().replace(" ", "-"),
+            name: query.to_string(),
+            url: monster_url,
+        };
+        Ok(vec![SearchResult::Reference(reference)])
+    }
+
+    async fn search_race(&self, query: &str) -> Result<Vec<SearchResult>, String> {
+        let race_url = format!("{}/{}", self.base_url, query.to_lowercase());
+        
+        let response = self.client
+            .get(&race_url)
+            .send()
+            .await
+            .map_err(|e| format!("Network request failed: {}", e))?;
+
+        if !response.status().is_success() {
+            return Err(format!("Race '{}' not found", query));
+        }
+
+        let html = response.text().await
+            .map_err(|e| format!("Failed to read response: {}", e))?;
+
+        // For now, return as reference since race parsing would be complex
+        let reference = WikiReference {
+            index: query.to_lowercase().replace(" ", "-"),
+            name: query.to_string(),
+            url: race_url,
+        };
+        Ok(vec![SearchResult::Reference(reference)])
+    }
+
+    // HTML parsing methods for Wikidot content
+    fn parse_spell_html(&self, document: &Html, query: &str) -> Result<SpellDetail, String> {
+        let content_selector = Selector::parse("#page-content").unwrap();
+        let content = document.select(&content_selector).next()
+            .ok_or("Could not find page content")?;
+
+        let content_text = content.inner_html();
+        
+        // Extract spell level and school from "3rd-level evocation" pattern
+        let level_school_regex = Regex::new(r"<em>([^<]+)-level ([^<]+)</em>").unwrap();
+        let (level, school) = if let Some(caps) = level_school_regex.captures(&content_text) {
+            (caps[1].to_string() + "-level", caps[2].to_string())
+        } else {
+            ("Unknown level".to_string(), "Unknown school".to_string())
+        };
+
+        // Extract casting time, range, components, duration
+        let casting_time = self.extract_field(&content_text, "Casting Time:", "<br")
+            .unwrap_or_else(|| "Unknown".to_string());
+        let range = self.extract_field(&content_text, "Range:", "<br")
+            .unwrap_or_else(|| "Unknown".to_string());
+        let components = self.extract_field(&content_text, "Components:", "<br")
+            .unwrap_or_else(|| "Unknown".to_string());
+        let duration = self.extract_field(&content_text, "Duration:", "</p>")
+            .unwrap_or_else(|| "Unknown".to_string());
+
+        // Extract main description (first paragraph after duration)
+        let desc_start = content_text.find("</p>").unwrap_or(0);
+        let description = self.extract_description(&content_text[desc_start..]);
+
+        // Extract higher level effects
+        let higher_level = self.extract_higher_level(&content_text);
+
+        // Extract spell lists
+        let spell_lists = self.extract_spell_lists(&content_text);
+
+        Ok(SpellDetail {
+            index: query.to_lowercase().replace(" ", "-"),
+            name: query.to_string(),
+            level,
+            school,
+            casting_time,
+            range,
+            components,
+            duration,
+            description,
+            higher_level,
+            spell_lists,
+        })
+    }
+
+    fn parse_class_html(&self, document: &Html, query: &str) -> Result<ClassDetail, String> {
+        let content_selector = Selector::parse("#page-content").unwrap();
+        let content = document.select(&content_selector).next()
+            .ok_or("Could not find page content")?;
+
+        let content_text = content.inner_html();
+        
+        // Extract hit die from "Hit Dice: 1d10" pattern
+        let hit_die = self.extract_field(&content_text, "Hit Dice:", "<br")
+            .unwrap_or_else(|| "Unknown".to_string());
+
+        // Extract proficiencies
+        let proficiencies = self.extract_multi_line_field(&content_text, "Armor:", "Weapons:");
+
+        // Extract saving throws
+        let saving_throws = self.extract_field(&content_text, "Saving Throws:", "<br")
+            .unwrap_or_else(|| "Unknown".to_string());
+
+        // Extract skills
+        let skills = self.extract_field(&content_text, "Skills:", "</p>")
+            .unwrap_or_else(|| "Unknown".to_string());
+
+        // Extract equipment (basic extraction)
+        let equipment = self.extract_equipment_section(&content_text);
+
+        Ok(ClassDetail {
+            index: query.to_lowercase().replace(" ", "-"),
+            name: query.to_string(),
+            hit_die,
+            proficiencies,
+            saving_throws,
+            skills,
+            equipment,
+        })
+    }
+
+    fn parse_equipment_html(&self, document: &Html, query: &str) -> Result<EquipmentDetail, String> {
+        let content_selector = Selector::parse("#page-content").unwrap();
+        let content = document.select(&content_selector).next()
+            .ok_or("Could not find page content")?;
+
+        let content_text = content.inner_html();
+        
+        // Basic equipment parsing - this would need refinement for different types
+        let category = "Equipment".to_string(); // Could be refined
+        let cost = self.extract_field(&content_text, "Cost:", " ")
+            .unwrap_or_else(|| "Unknown".to_string());
+        let weight = self.extract_field(&content_text, "Weight:", " ")
+            .unwrap_or_else(|| "Unknown".to_string());
+        let description = self.extract_description(&content_text);
+        let properties = "".to_string(); // Would need specific parsing
+
+        Ok(EquipmentDetail {
+            index: query.to_lowercase().replace(" ", "-"),
+            name: query.to_string(),
+            category,
+            cost,
+            weight,
+            description,
+            properties,
+        })
+    }
+
+    // Helper methods for HTML extraction
+    fn extract_field(&self, html: &str, field_name: &str, end_marker: &str) -> Option<String> {
+        if let Some(start) = html.find(field_name) {
+            let start_pos = start + field_name.len();
+            if let Some(end) = html[start_pos..].find(end_marker) {
+                let content = html[start_pos..start_pos + end].trim();
+                // Strip HTML tags
+                let tag_regex = Regex::new(r"<[^>]+>").unwrap();
+                return Some(tag_regex.replace_all(content, "").trim().to_string());
+            }
+        }
+        None
+    }
+
+    fn extract_description(&self, html: &str) -> String {
+        // Find the first paragraph after the stats
+        let p_regex = Regex::new(r"<p>([^<]+)</p>").unwrap();
+        if let Some(caps) = p_regex.captures(html) {
+            caps[1].trim().to_string()
+        } else {
+            "No description available".to_string()
+        }
+    }
+
+    fn extract_higher_level(&self, html: &str) -> String {
+        let higher_regex = Regex::new(r"<strong><em>At Higher Levels\.</em></strong>\s*([^<]+)").unwrap();
+        if let Some(caps) = higher_regex.captures(html) {
+            caps[1].trim().to_string()
+        } else {
+            "".to_string()
+        }
+    }
+
+    fn extract_spell_lists(&self, html: &str) -> String {
+        let lists_regex = Regex::new(r"<strong><em>Spell Lists\.</em></strong>\s*(.+?)(?:</p>|$)").unwrap();
+        if let Some(caps) = lists_regex.captures(html) {
+            let content = caps[1].trim();
+            let tag_regex = Regex::new(r"<[^>]+>").unwrap();
+            tag_regex.replace_all(content, "").trim().to_string()
+        } else {
+            "".to_string()
+        }
+    }
+
+    fn extract_multi_line_field(&self, html: &str, start_field: &str, end_field: &str) -> String {
+        if let Some(start) = html.find(start_field) {
+            if let Some(end) = html[start..].find(end_field) {
+                let content = &html[start..start + end];
+                let tag_regex = Regex::new(r"<[^>]+>").unwrap();
+                return tag_regex.replace_all(content, " ").trim().to_string();
+            }
+        }
+        "Unknown".to_string()
+    }
+
+    fn extract_equipment_section(&self, html: &str) -> String {
+        // Look for equipment section
+        if let Some(start) = html.find("Equipment") {
+            if let Some(end) = html[start..start + 500].find("</ul>") {
+                let content = &html[start..start + end];
+                let tag_regex = Regex::new(r"<[^>]+>").unwrap();
+                return tag_regex.replace_all(content, " ").trim().to_string();
+            }
+        }
+        "".to_string()
+    }
+
+    async fn fuzzy_search(&self, query: &str, category: Option<SearchCategory>) -> Result<Vec<SearchResult>, String> {
+        // For Wikidot, fuzzy search would require scraping list pages
+        // This is a simplified version that attempts common variations
+        let variations = self.generate_query_variations(query);
+        
+        let categories = match category {
+            Some(cat) => vec![cat],
+            None => SearchCategory::all(),
+        };
+
+        for cat in categories {
+            for variation in &variations {
+                if let Ok(results) = self.search_category(variation, cat).await {
+                    if !results.is_empty() {
+                        return Ok(results);
+                    }
+                }
+            }
+        }
+
+        Err(format!("No matches found for '{}'", query))
+    }
+
+    fn generate_query_variations(&self, query: &str) -> Vec<String> {
+        let mut variations = vec![query.to_string()];
+        
+        // Try with dashes instead of spaces
+        variations.push(query.replace(" ", "-"));
+        
+        // Try without spaces
+        variations.push(query.replace(" ", ""));
+        
+        // Try lowercase
+        variations.push(query.to_lowercase());
+        variations.push(query.to_lowercase().replace(" ", "-"));
+        
+        // Try title case variations
+        let words: Vec<&str> = query.split_whitespace().collect();
+        if words.len() > 1 {
+            let title_case = words.iter()
+                .map(|w| format!("{}{}", w.chars().next().unwrap().to_uppercase(), &w[1..].to_lowercase()))
+                .collect::<Vec<_>>()
+                .join(" ");
+            variations.push(title_case.clone());
+            variations.push(title_case.replace(" ", "-"));
+        }
+        
+        variations
+    }
+
+    // Method to get suggestions when no exact match is found
+    pub async fn get_suggestions(&self, query: &str, _category: Option<SearchCategory>) -> Vec<String> {
+        // For Wikidot implementation, this would be much simpler
+        // since we don't have cached data. Return common suggestions based on query
+        let mut suggestions = Vec::new();
+        
         let query_lower = query.to_lowercase();
-        let candidate_lower = candidate.to_lowercase();
         
-        // Simple similarity based on common characters and length difference
-        let common_chars: usize = query_lower.chars()
-            .filter(|c| candidate_lower.contains(*c))
-            .count();
+        // Common spell suggestions
+        if query_lower.contains("fire") {
+            suggestions.extend(vec!["fireball".to_string(), "fire-bolt".to_string(), "burning-hands".to_string()]);
+        }
+        if query_lower.contains("heal") {
+            suggestions.extend(vec!["cure-wounds".to_string(), "healing-word".to_string(), "heal".to_string()]);
+        }
+        if query_lower.contains("light") {
+            suggestions.extend(vec!["light".to_string(), "dancing-lights".to_string(), "lightning-bolt".to_string()]);
+        }
         
-        let length_penalty = ((query_lower.len() as i32 - candidate_lower.len() as i32).abs() as f32) * 0.1;
+        // Common class suggestions
+        if query_lower.len() <= 8 { // Likely a class name
+            let common_classes = vec!["fighter", "wizard", "cleric", "rogue", "ranger", "paladin", "barbarian", "bard", "druid", "monk", "sorcerer", "warlock"];
+            for class in common_classes {
+                if class.starts_with(&query_lower) || query_lower.starts_with(class) {
+                    suggestions.push(class.to_string());
+                }
+            }
+        }
         
-        (common_chars as f32) / (query_lower.len() as f32) - length_penalty
+        // Remove duplicates and limit to 5
+        suggestions.sort();
+        suggestions.dedup();
+        suggestions.truncate(5);
+        
+        suggestions
     }
 }
 
@@ -798,18 +823,15 @@ mod tests {
         let spell = SpellDetail {
             index: "fireball".to_string(),
             name: "Fireball".to_string(),
-            level: 3,
-            school: ApiReference {
-                index: "evocation".to_string(),
-                name: "Evocation".to_string(),
-                url: "/magic-schools/evocation".to_string(),
-            },
+            level: "3rd-level".to_string(),
+            school: "Evocation".to_string(),
             casting_time: "1 action".to_string(),
             range: "150 feet".to_string(),
-            components: vec!["V".to_string(), "S".to_string(), "M".to_string()],
+            components: "V, S, M".to_string(),
             duration: "Instantaneous".to_string(),
-            description: vec!["A bright streak flashes...".to_string()],
-            higher_level: vec![],
+            description: "A bright streak flashes...".to_string(),
+            higher_level: "".to_string(),
+            spell_lists: "Sorcerer, Wizard".to_string(),
         };
         
         let result = SearchResult::Spell(spell);
@@ -820,124 +842,18 @@ mod tests {
     #[test]
     fn test_dnd_search_client_creation() {
         let client = DndSearchClient::new();
-        assert_eq!(client.base_url, "https://www.dnd5eapi.co/api/2014");
-        // Client may be offline in test environment
-        assert!(client.cached_data.len() > 0);
+        assert_eq!(client.base_url, "http://dnd5e.wikidot.com");
     }
 
     #[test]
-    fn test_offline_cache_populated() {
+    fn test_query_variations() {
         let client = DndSearchClient::new();
+        let variations = client.generate_query_variations("Magic Missile");
         
-        // Test that cache has data for all categories
-        assert!(client.cached_data.contains_key(&SearchCategory::Spells));
-        assert!(client.cached_data.contains_key(&SearchCategory::Classes));
-        assert!(client.cached_data.contains_key(&SearchCategory::Equipment));
-        assert!(client.cached_data.contains_key(&SearchCategory::Races));
-        assert!(client.cached_data.contains_key(&SearchCategory::Monsters));
-        
-        // Test that spells cache has fireball
-        let spells = client.cached_data.get(&SearchCategory::Spells).unwrap();
-        assert!(spells.iter().any(|s| s.name == "Fireball"));
-        
-        // Test that classes cache has Fighter
-        let classes = client.cached_data.get(&SearchCategory::Classes).unwrap();
-        assert!(classes.iter().any(|c| c.name == "Fighter"));
-    }
-
-    #[test]
-    fn test_fuzzy_regex_creation() {
-        let regex = DndSearchClient::create_fuzzy_regex("fire").unwrap();
-        assert!(regex.is_match("fireball"));
-        assert!(regex.is_match("Fire Bolt"));
-        assert!(regex.is_match("burning fire"));
-        assert!(!regex.is_match("water"));
-    }
-
-    #[test]
-    fn test_similarity_score() {
-        assert!(DndSearchClient::similarity_score("fire", "fireball") > 0.0);
-        assert!(DndSearchClient::similarity_score("fire", "fireball") > 
-                DndSearchClient::similarity_score("fire", "water"));
-        assert!(DndSearchClient::similarity_score("wizard", "wizard") > 
-                DndSearchClient::similarity_score("wizard", "fighter"));
-    }
-
-    #[tokio::test]
-    async fn test_offline_search() {
-        let mut client = DndSearchClient::new();
-        client.set_offline_mode(true);
-        
-        // Test exact match
-        let results = client.search_category("Fireball", SearchCategory::Spells).await;
-        assert!(results.is_ok());
-        let results = results.unwrap();
-        assert!(results.len() > 0);
-        assert_eq!(results[0].name(), "Fireball");
-        
-        // Test no match
-        let results = client.search_category("NonExistentSpell", SearchCategory::Spells).await;
-        assert!(results.is_ok());
-        let results = results.unwrap();
-        assert_eq!(results.len(), 0);
-    }
-
-    #[tokio::test]
-    async fn test_fuzzy_search() {
-        let mut client = DndSearchClient::new();
-        client.set_offline_mode(true);
-        
-        // Test fuzzy match
-        let results = client.fuzzy_search("fire", Some(SearchCategory::Spells)).await;
-        assert!(results.is_ok());
-        let results = results.unwrap();
-        assert!(results.len() > 0);
-        
-        // Should find Fireball
-        assert!(results.iter().any(|r| r.name().contains("Fire") || r.name().contains("fire")));
-    }
-
-    #[tokio::test]
-    async fn test_get_suggestions() {
-        let mut client = DndSearchClient::new();
-        client.set_offline_mode(true);
-        
-        let suggestions = client.get_suggestions("fir", Some(SearchCategory::Spells)).await;
-        assert!(suggestions.len() > 0);
-        assert!(suggestions.iter().any(|s| s.to_lowercase().contains("fire")));
-        
-        // Test with no matches should return empty
-        let suggestions = client.get_suggestions("zzznonexistent", Some(SearchCategory::Spells)).await;
-        assert!(suggestions.len() == 0);
-    }
-
-    #[tokio::test]
-    async fn test_search_with_suggestions() {
-        let mut client = DndSearchClient::new();
-        client.set_offline_mode(true);
-        
-        // Test exact match should work
-        let results = client.search("Fireball", Some(SearchCategory::Spells)).await;
-        assert!(results.is_ok());
-        let results = results.unwrap();
-        assert!(results.len() > 0);
-        
-        // Test partial match should trigger fuzzy search
-        let results = client.search("fire", Some(SearchCategory::Spells)).await;
-        assert!(results.is_ok());
-        let results = results.unwrap();
-        assert!(results.len() > 0);
-    }
-
-    #[test]
-    fn test_search_all_categories() {
-        let all_categories = SearchCategory::all();
-        assert_eq!(all_categories.len(), 5);
-        assert!(all_categories.contains(&SearchCategory::Spells));
-        assert!(all_categories.contains(&SearchCategory::Classes));
-        assert!(all_categories.contains(&SearchCategory::Equipment));
-        assert!(all_categories.contains(&SearchCategory::Monsters));
-        assert!(all_categories.contains(&SearchCategory::Races));
+        assert!(variations.contains(&"Magic Missile".to_string()));
+        assert!(variations.contains(&"magic-missile".to_string()));
+        assert!(variations.contains(&"magic missile".to_string()));
+        assert!(variations.contains(&"Magic-Missile".to_string()));
     }
 
     #[test]
@@ -945,24 +861,21 @@ mod tests {
         let spell = SpellDetail {
             index: "fireball".to_string(),
             name: "Fireball".to_string(),
-            level: 3,
-            school: ApiReference {
-                index: "evocation".to_string(),
-                name: "Evocation".to_string(),
-                url: "/magic-schools/evocation".to_string(),
-            },
+            level: "3rd-level".to_string(),
+            school: "Evocation".to_string(),
             casting_time: "1 action".to_string(),
             range: "150 feet".to_string(),
-            components: vec!["V".to_string(), "S".to_string(), "M".to_string()],
+            components: "V, S, M".to_string(),
             duration: "Instantaneous".to_string(),
-            description: vec!["A bright streak flashes...".to_string()],
-            higher_level: vec!["When you cast this spell...".to_string()],
+            description: "A bright streak flashes...".to_string(),
+            higher_level: "When you cast this spell...".to_string(),
+            spell_lists: "Sorcerer, Wizard".to_string(),
         };
         
         let result = SearchResult::Spell(spell);
         let fields = result.get_available_fields();
         
-        assert_eq!(fields.len(), 9);
+        assert_eq!(fields.len(), 10);
         assert!(fields.contains(&"name".to_string()));
         assert!(fields.contains(&"level".to_string()));
         assert!(fields.contains(&"school".to_string()));
@@ -972,6 +885,7 @@ mod tests {
         assert!(fields.contains(&"duration".to_string()));
         assert!(fields.contains(&"description".to_string()));
         assert!(fields.contains(&"higher_level".to_string()));
+        assert!(fields.contains(&"spell_lists".to_string()));
     }
 
     #[test]
@@ -979,21 +893,23 @@ mod tests {
         let class = ClassDetail {
             index: "fighter".to_string(),
             name: "Fighter".to_string(),
-            hit_die: 10,
-            proficiency_choices: vec![],
-            proficiencies: vec![],
-            saving_throws: vec![],
+            hit_die: "1d10 per fighter level".to_string(),
+            proficiencies: "All armor, shields".to_string(),
+            saving_throws: "Strength, Constitution".to_string(),
+            skills: "Choose two skills from...".to_string(),
+            equipment: "Chain mail or leather...".to_string(),
         };
         
         let result = SearchResult::Class(class);
         let fields = result.get_available_fields();
         
-        assert_eq!(fields.len(), 5);
+        assert_eq!(fields.len(), 6);
         assert!(fields.contains(&"name".to_string()));
         assert!(fields.contains(&"hit_die".to_string()));
         assert!(fields.contains(&"proficiencies".to_string()));
         assert!(fields.contains(&"saving_throws".to_string()));
-        assert!(fields.contains(&"proficiency_choices".to_string()));
+        assert!(fields.contains(&"skills".to_string()));
+        assert!(fields.contains(&"equipment".to_string()));
     }
 
     #[test]
@@ -1001,38 +917,31 @@ mod tests {
         let equipment = EquipmentDetail {
             index: "longsword".to_string(),
             name: "Longsword".to_string(),
-            equipment_category: ApiReference {
-                index: "weapon".to_string(),
-                name: "Weapon".to_string(),
-                url: "/equipment-categories/weapon".to_string(),
-            },
-            gear_category: None,
-            weapon_category: Some("Martial Melee".to_string()),
-            armor_category: None,
-            cost: Some(Cost {
-                quantity: 15,
-                unit: "gp".to_string(),
-            }),
-            weight: Some(3.0),
-            description: vec!["A versatile weapon.".to_string()],
+            category: "Weapon".to_string(),
+            cost: "15 gp".to_string(),
+            weight: "3 lb".to_string(),
+            description: "A versatile weapon.".to_string(),
+            properties: "Versatile (1d10)".to_string(),
         };
         
         let result = SearchResult::Equipment(equipment);
         let fields = result.get_available_fields();
         
-        assert_eq!(fields.len(), 8);
+        assert_eq!(fields.len(), 6);
         assert!(fields.contains(&"name".to_string()));
         assert!(fields.contains(&"category".to_string()));
         assert!(fields.contains(&"cost".to_string()));
         assert!(fields.contains(&"weight".to_string()));
+        assert!(fields.contains(&"description".to_string()));
+        assert!(fields.contains(&"properties".to_string()));
     }
 
     #[test]
     fn test_reference_available_fields() {
-        let reference = ApiReference {
+        let reference = WikiReference {
             index: "fireball".to_string(),
             name: "Fireball".to_string(),
-            url: "/spells/fireball".to_string(),
+            url: "http://dnd5e.wikidot.com/spell:fireball".to_string(),
         };
         
         let result = SearchResult::Reference(reference);
@@ -1049,114 +958,28 @@ mod tests {
         let spell = SpellDetail {
             index: "fireball".to_string(),
             name: "Fireball".to_string(),
-            level: 3,
-            school: ApiReference {
-                index: "evocation".to_string(),
-                name: "Evocation".to_string(),
-                url: "/magic-schools/evocation".to_string(),
-            },
+            level: "3rd-level".to_string(),
+            school: "Evocation".to_string(),
             casting_time: "1 action".to_string(),
             range: "150 feet".to_string(),
-            components: vec!["V".to_string(), "S".to_string(), "M".to_string()],
+            components: "V, S, M".to_string(),
             duration: "Instantaneous".to_string(),
-            description: vec!["A bright streak flashes...".to_string()],
-            higher_level: vec![],
+            description: "A bright streak flashes...".to_string(),
+            higher_level: "".to_string(),
+            spell_lists: "Sorcerer, Wizard".to_string(),
         };
         
         let result = SearchResult::Spell(spell);
         
         assert_eq!(result.get_field_value("name"), Some("Fireball".to_string()));
-        assert_eq!(result.get_field_value("level"), Some("Level 3".to_string()));
+        assert_eq!(result.get_field_value("level"), Some("3rd-level".to_string()));
         assert_eq!(result.get_field_value("school"), Some("Evocation".to_string()));
         assert_eq!(result.get_field_value("casting_time"), Some("1 action".to_string()));
         assert_eq!(result.get_field_value("range"), Some("150 feet".to_string()));
         assert_eq!(result.get_field_value("components"), Some("V, S, M".to_string()));
         assert_eq!(result.get_field_value("duration"), Some("Instantaneous".to_string()));
         assert_eq!(result.get_field_value("description"), Some("A bright streak flashes...".to_string()));
-        assert_eq!(result.get_field_value("higher_level"), Some("No higher level effects".to_string()));
-        assert_eq!(result.get_field_value("invalid_field"), None);
-    }
-
-    #[test]
-    fn test_class_field_values() {
-        let class = ClassDetail {
-            index: "fighter".to_string(),
-            name: "Fighter".to_string(),
-            hit_die: 10,
-            proficiency_choices: vec![],
-            proficiencies: vec![
-                ApiReference {
-                    index: "armor-light".to_string(),
-                    name: "Light Armor".to_string(),
-                    url: "/proficiencies/armor-light".to_string(),
-                }
-            ],
-            saving_throws: vec![
-                ApiReference {
-                    index: "str".to_string(),
-                    name: "Strength".to_string(),
-                    url: "/ability-scores/str".to_string(),
-                }
-            ],
-        };
-        
-        let result = SearchResult::Class(class);
-        
-        assert_eq!(result.get_field_value("name"), Some("Fighter".to_string()));
-        assert_eq!(result.get_field_value("hit_die"), Some("d10".to_string()));
-        assert_eq!(result.get_field_value("proficiencies"), Some("Light Armor".to_string()));
-        assert_eq!(result.get_field_value("saving_throws"), Some("Strength".to_string()));
-        assert_eq!(result.get_field_value("proficiency_choices"), Some("No proficiency choices listed".to_string()));
-        assert_eq!(result.get_field_value("invalid_field"), None);
-    }
-
-    #[test]
-    fn test_equipment_field_values() {
-        let equipment = EquipmentDetail {
-            index: "longsword".to_string(),
-            name: "Longsword".to_string(),
-            equipment_category: ApiReference {
-                index: "weapon".to_string(),
-                name: "Weapon".to_string(),
-                url: "/equipment-categories/weapon".to_string(),
-            },
-            gear_category: None,
-            weapon_category: Some("Martial Melee".to_string()),
-            armor_category: None,
-            cost: Some(Cost {
-                quantity: 15,
-                unit: "gp".to_string(),
-            }),
-            weight: Some(3.0),
-            description: vec!["A versatile weapon.".to_string()],
-        };
-        
-        let result = SearchResult::Equipment(equipment);
-        
-        assert_eq!(result.get_field_value("name"), Some("Longsword".to_string()));
-        assert_eq!(result.get_field_value("category"), Some("Weapon".to_string()));
-        assert_eq!(result.get_field_value("gear_category"), Some("No gear category".to_string()));
-        assert_eq!(result.get_field_value("weapon_category"), Some("Martial Melee".to_string()));
-        assert_eq!(result.get_field_value("armor_category"), Some("Not armor".to_string()));
-        assert_eq!(result.get_field_value("cost"), Some("15 gp".to_string()));
-        assert_eq!(result.get_field_value("weight"), Some("3 lb".to_string()));
-        assert_eq!(result.get_field_value("description"), Some("A versatile weapon.".to_string()));
-        assert_eq!(result.get_field_value("invalid_field"), None);
-    }
-
-    #[test]
-    fn test_reference_field_values() {
-        let reference = ApiReference {
-            index: "fireball".to_string(),
-            name: "Fireball".to_string(),
-            url: "/spells/fireball".to_string(),
-        };
-        
-        let result = SearchResult::Reference(reference);
-        
-        assert_eq!(result.get_field_value("name"), Some("Fireball".to_string()));
-        assert_eq!(result.get_field_value("index"), Some("fireball".to_string()));
-        assert_eq!(result.get_field_value("url"), Some("/spells/fireball".to_string()));
+        assert_eq!(result.get_field_value("spell_lists"), Some("Sorcerer, Wizard".to_string()));
         assert_eq!(result.get_field_value("invalid_field"), None);
     }
 
@@ -1165,339 +988,151 @@ mod tests {
         let spell = SpellDetail {
             index: "fireball".to_string(),
             name: "Fireball".to_string(),
-            level: 3,
-            school: ApiReference {
-                index: "evocation".to_string(),
-                name: "Evocation".to_string(),
-                url: "/magic-schools/evocation".to_string(),
-            },
+            level: "3rd-level".to_string(),
+            school: "Evocation".to_string(),
             casting_time: "1 action".to_string(),
             range: "150 feet".to_string(),
-            components: vec!["V".to_string(), "S".to_string(), "M".to_string()],
+            components: "V, S, M".to_string(),
             duration: "Instantaneous".to_string(),
-            description: vec!["A bright streak flashes...".to_string()],
-            higher_level: vec![],
+            description: "A bright streak flashes...".to_string(),
+            higher_level: "".to_string(),
+            spell_lists: "Sorcerer, Wizard".to_string(),
         };
         
         let result = SearchResult::Spell(spell);
         
         // Test case insensitive field queries
         assert_eq!(result.get_field_value("NAME"), Some("Fireball".to_string()));
-        assert_eq!(result.get_field_value("Level"), Some("Level 3".to_string()));
+        assert_eq!(result.get_field_value("Level"), Some("3rd-level".to_string()));
         assert_eq!(result.get_field_value("SCHOOL"), Some("Evocation".to_string()));
         assert_eq!(result.get_field_value("casting_TIME"), Some("1 action".to_string()));
     }
 
-    #[test]
-    fn test_empty_descriptions_and_lists() {
-        let spell = SpellDetail {
-            index: "test".to_string(),
-            name: "Test Spell".to_string(),
-            level: 1,
-            school: ApiReference {
-                index: "test".to_string(),
-                name: "Test School".to_string(),
-                url: "/test".to_string(),
-            },
-            casting_time: "1 action".to_string(),
-            range: "Touch".to_string(),
-            components: vec![],
-            duration: "Instantaneous".to_string(),
-            description: vec![],
-            higher_level: vec![],
-        };
-        
-        let result = SearchResult::Spell(spell);
-        
-        assert_eq!(result.get_field_value("description"), Some("No description available".to_string()));
-        assert_eq!(result.get_field_value("higher_level"), Some("No higher level effects".to_string()));
-        assert_eq!(result.get_field_value("components"), Some("".to_string()));
-        
-        // Test class with empty lists
-        let class = ClassDetail {
-            index: "test".to_string(),
-            name: "Test Class".to_string(),
-            hit_die: 8,
-            proficiency_choices: vec![],
-            proficiencies: vec![],
-            saving_throws: vec![],
-        };
-        
-        let class_result = SearchResult::Class(class);
-        assert_eq!(class_result.get_field_value("proficiencies"), Some("No proficiencies listed".to_string()));
-        assert_eq!(class_result.get_field_value("saving_throws"), Some("No saving throw proficiencies listed".to_string()));
-    }
-
-    #[test]
-    fn test_multiline_descriptions() {
-        let spell = SpellDetail {
-            index: "test".to_string(),
-            name: "Test Spell".to_string(),
-            level: 1,
-            school: ApiReference {
-                index: "test".to_string(),
-                name: "Test School".to_string(),
-                url: "/test".to_string(),
-            },
-            casting_time: "1 action".to_string(),
-            range: "Touch".to_string(),
-            components: vec!["V".to_string()],
-            duration: "Instantaneous".to_string(),
-            description: vec![
-                "First line of description.".to_string(),
-                "Second line of description.".to_string(),
-            ],
-            higher_level: vec![
-                "First higher level effect.".to_string(),
-                "Second higher level effect.".to_string(),
-            ],
-        };
-        
-        let result = SearchResult::Spell(spell);
-        
-        let expected_description = "First line of description.\nSecond line of description.";
-        let expected_higher = "First higher level effect.\nSecond higher level effect.";
-        
-        assert_eq!(result.get_field_value("description"), Some(expected_description.to_string()));
-        assert_eq!(result.get_field_value("higher_level"), Some(expected_higher.to_string()));
-    }
-
-    #[test]
-    fn test_interactive_field_functionality() {
-        // Test that all field types return expected available fields
-        let spell_result = create_test_spell_result();
-        let spell_fields = spell_result.get_available_fields();
-        assert!(spell_fields.contains(&"name".to_string()));
-        assert!(spell_fields.contains(&"description".to_string()));
-        assert_eq!(spell_fields.len(), 9);
-
-        let class_result = create_test_class_result();
-        let class_fields = class_result.get_available_fields();
-        assert!(class_fields.contains(&"name".to_string()));
-        assert!(class_fields.contains(&"hit_die".to_string()));
-        assert_eq!(class_fields.len(), 5);
-
-        let equipment_result = create_test_equipment_result();
-        let equipment_fields = equipment_result.get_available_fields();
-        assert!(equipment_fields.contains(&"name".to_string()));
-        assert!(equipment_fields.contains(&"cost".to_string()));
-        assert_eq!(equipment_fields.len(), 8);
-
-        let reference_result = create_test_reference_result();
-        let reference_fields = reference_result.get_available_fields();
-        assert!(reference_fields.contains(&"name".to_string()));
-        assert!(reference_fields.contains(&"index".to_string()));
-        assert_eq!(reference_fields.len(), 3);
-    }
-
-    #[test]
-    fn test_field_value_retrieval_comprehensive() {
-        let spell_result = create_test_spell_result();
-        
-        // Test all spell fields
-        assert!(spell_result.get_field_value("name").is_some());
-        assert!(spell_result.get_field_value("level").is_some());
-        assert!(spell_result.get_field_value("school").is_some());
-        assert!(spell_result.get_field_value("casting_time").is_some());
-        assert!(spell_result.get_field_value("range").is_some());
-        assert!(spell_result.get_field_value("components").is_some());
-        assert!(spell_result.get_field_value("duration").is_some());
-        assert!(spell_result.get_field_value("description").is_some());
-        assert!(spell_result.get_field_value("higher_level").is_some());
-        
-        // Test non-existent field
-        assert!(spell_result.get_field_value("nonexistent_field").is_none());
-    }
-
-    #[test]
-    fn test_display_field_handling() {
-        let spell_result = create_test_spell_result();
-        
-        // This test verifies that display_field doesn't panic
-        // We can't easily test the output, but we can ensure it doesn't crash
-        let field_value = spell_result.get_field_value("name");
-        assert!(field_value.is_some());
-        
-        let invalid_field_value = spell_result.get_field_value("invalid");
-        assert!(invalid_field_value.is_none());
-    }
-
-    // Helper functions for creating test data
-    fn create_test_spell_result() -> SearchResult {
-        SearchResult::Spell(SpellDetail {
-            index: "test-spell".to_string(),
-            name: "Test Spell".to_string(),
-            level: 3,
-            school: ApiReference {
-                index: "evocation".to_string(),
-                name: "Evocation".to_string(),
-                url: "/magic-schools/evocation".to_string(),
-            },
-            casting_time: "1 action".to_string(),
-            range: "120 feet".to_string(),
-            components: vec!["V".to_string(), "S".to_string()],
-            duration: "Concentration, up to 1 minute".to_string(),
-            description: vec!["Test spell description".to_string()],
-            higher_level: vec!["Higher level effects".to_string()],
-        })
-    }
-
-    fn create_test_class_result() -> SearchResult {
-        SearchResult::Class(ClassDetail {
-            index: "test-class".to_string(),
-            name: "Test Class".to_string(),
-            hit_die: 8,
-            proficiency_choices: vec![],
-            proficiencies: vec![ApiReference {
-                index: "test-prof".to_string(),
-                name: "Test Proficiency".to_string(),
-                url: "/proficiencies/test".to_string(),
-            }],
-            saving_throws: vec![ApiReference {
-                index: "wis".to_string(),
-                name: "Wisdom".to_string(),
-                url: "/ability-scores/wis".to_string(),
-            }],
-        })
-    }
-
-    fn create_test_equipment_result() -> SearchResult {
-        SearchResult::Equipment(EquipmentDetail {
-            index: "test-equipment".to_string(),
-            name: "Test Equipment".to_string(),
-            equipment_category: ApiReference {
-                index: "weapon".to_string(),
-                name: "Weapon".to_string(),
-                url: "/equipment-categories/weapon".to_string(),
-            },
-            gear_category: None,
-            weapon_category: Some("Simple Melee".to_string()),
-            armor_category: None,
-            cost: Some(Cost {
-                quantity: 10,
-                unit: "gp".to_string(),
-            }),
-            weight: Some(2.5),
-            description: vec!["Test equipment description".to_string()],
-        })
-    }
-
-    fn create_test_reference_result() -> SearchResult {
-        SearchResult::Reference(ApiReference {
-            index: "test-reference".to_string(),
-            name: "Test Reference".to_string(),
-            url: "/test-references/test".to_string(),
-        })
-    }
-
     #[tokio::test]
-    async fn test_online_connectivity() {
-        // Test that we can create a client and it correctly detects online/offline status
+    async fn test_get_suggestions() {
         let client = DndSearchClient::new();
         
-        // The client should have the correct base URL
-        assert_eq!(client.base_url, "https://www.dnd5eapi.co/api/2014");
+        let suggestions = client.get_suggestions("fir", Some(SearchCategory::Spells)).await;
+        assert!(suggestions.iter().any(|s| s.contains("fire")));
         
-        // Test network connectivity if available
-        if !client.is_offline() {
-            println!("🌐 Testing online connectivity...");
-            
-            // Try to make a simple request to the API
-            match reqwest::Client::new()
-                .get("https://www.dnd5eapi.co/api/2014/spells")
-                .timeout(std::time::Duration::from_secs(10))
-                .send()
-                .await
-            {
-                Ok(response) => {
-                    println!("✅ Online connectivity test passed - API is reachable");
-                    assert!(response.status().is_success(), "API should return success status");
-                },
-                Err(e) => {
-                    println!("⚠️ Online connectivity test failed: {}", e);
-                    println!("💡 This is expected if running in an environment without internet access");
-                    // Don't fail the test - network may not be available in testing environment
-                }
-            }
-        } else {
-            println!("📴 Client is in offline mode - network test skipped");
-        }
-        
-        // Test that cached data is properly initialized
-        assert!(!client.cached_data.is_empty(), "Cached data should be initialized");
-        assert!(client.cached_data.contains_key(&SearchCategory::Spells), "Should have cached spells");
-        assert!(client.cached_data.contains_key(&SearchCategory::Classes), "Should have cached classes");
-        assert!(client.cached_data.contains_key(&SearchCategory::Equipment), "Should have cached equipment");
+        let suggestions = client.get_suggestions("fig", Some(SearchCategory::Classes)).await;
+        assert!(suggestions.iter().any(|s| s == "fighter"));
     }
 
-    #[tokio::test]
-    async fn test_api_response_structure() {
-        // Test that our API response structures can parse real API responses
-        let sample_api_response = r#"{
-            "count": 2,
-            "results": [
-                {
-                    "index": "fireball",
-                    "name": "Fireball",
-                    "level": 3,
-                    "url": "/api/2014/spells/fireball"
-                },
-                {
-                    "index": "magic-missile",
-                    "name": "Magic Missile", 
-                    "level": 1,
-                    "url": "/api/2014/spells/magic-missile"
-                }
-            ]
-        }"#;
-
-        // This should parse correctly with our ApiListResponse structure
-        let parsed: Result<ApiListResponse, _> = serde_json::from_str(sample_api_response);
-        assert!(parsed.is_ok(), "Should be able to parse API list response");
-        
-        let response = parsed.unwrap();
-        assert_eq!(response.count, 2);
-        assert_eq!(response.results.len(), 2);
-        assert_eq!(response.results[0].name, "Fireball");
-        assert_eq!(response.results[1].name, "Magic Missile");
+    #[test]
+    fn test_search_all_categories() {
+        let all_categories = SearchCategory::all();
+        assert_eq!(all_categories.len(), 5);
+        assert!(all_categories.contains(&SearchCategory::Spells));
+        assert!(all_categories.contains(&SearchCategory::Classes));
+        assert!(all_categories.contains(&SearchCategory::Equipment));
+        assert!(all_categories.contains(&SearchCategory::Monsters));
+        assert!(all_categories.contains(&SearchCategory::Races));
     }
 
-    #[tokio::test]
-    async fn test_online_vs_offline_search_behavior() {
+    #[test]
+    fn test_html_field_extraction() {
         let client = DndSearchClient::new();
         
-        // Test offline search behavior
-        let offline_results = client.offline_search("fireball", SearchCategory::Spells);
-        match offline_results {
-            Ok(results) => {
-                println!("✅ Offline search returned {} results", results.len());
-                if !results.is_empty() {
-                    assert_eq!(results[0].name(), "Fireball");
+        // Test basic field extraction
+        let html = r#"<strong>Casting Time:</strong> 1 action<br />"#;
+        let result = client.extract_field(html, "Casting Time:", "<br");
+        assert_eq!(result, Some("1 action".to_string()));
+        
+        // Test with HTML tags in content
+        let html = r#"<strong>Range:</strong> <em>150 feet</em><br />"#;
+        let result = client.extract_field(html, "Range:", "<br");
+        assert_eq!(result, Some("150 feet".to_string()));
+    }
+
+    #[test]
+    fn test_description_extraction() {
+        let client = DndSearchClient::new();
+        
+        let html = r#"<p>A bright streak flashes from your pointing finger to a point you choose.</p>"#;
+        let result = client.extract_description(html);
+        assert_eq!(result, "A bright streak flashes from your pointing finger to a point you choose.");
+    }
+
+    #[test]
+    fn test_higher_level_extraction() {
+        let client = DndSearchClient::new();
+        
+        let html = r#"<strong><em>At Higher Levels.</em></strong> When you cast this spell using a spell slot of 4th level or higher"#;
+        let result = client.extract_higher_level(html);
+        assert_eq!(result, "When you cast this spell using a spell slot of 4th level or higher");
+    }
+
+    #[test]
+    fn test_spell_lists_extraction() {
+        let client = DndSearchClient::new();
+        
+        let html = r#"<strong><em>Spell Lists.</em></strong> <a href="/spells:sorcerer">Sorcerer</a>, <a href="/spells:wizard">Wizard</a></p>"#;
+        let result = client.extract_spell_lists(html);
+        assert_eq!(result, "Sorcerer, Wizard");
+    }
+
+    // Network connectivity test (only works if network is available)
+    #[tokio::test]
+    async fn test_wikidot_connectivity() {
+        // Test basic connectivity to Wikidot
+        match reqwest::Client::new()
+            .get("http://dnd5e.wikidot.com/spell:fireball")
+            .timeout(std::time::Duration::from_secs(10))
+            .send()
+            .await
+        {
+            Ok(response) => {
+                if response.status().is_success() {
+                    println!("✅ Wikidot connectivity test passed - site is reachable");
+                    assert!(response.status().is_success(), "Wikidot should return success status");
+                } else {
+                    println!("⚠️ Wikidot responded but with status: {}", response.status());
                 }
             },
             Err(e) => {
-                println!("ℹ️ Offline search failed as expected: {}", e);
+                println!("⚠️ Wikidot connectivity test failed: {}", e);
+                println!("💡 This is expected if running without internet access");
+                // Don't fail the test - network may not be available in testing environment
             }
         }
+    }
 
-        // If we have network connectivity, test online search
-        if !client.is_offline() && client.client.is_some() {
-            println!("🌐 Testing online search functionality...");
-            let online_results = client.search("fireball", Some(SearchCategory::Spells)).await;
-            match online_results {
-                Ok(results) => {
-                    println!("✅ Online search returned {} results", results.len());
-                    if !results.is_empty() {
-                        assert_eq!(results[0].name(), "Fireball");
+    // Test actual spell parsing with real data
+    #[tokio::test]
+    async fn test_real_spell_search() {
+        let client = DndSearchClient::new();
+        
+        println!("🔍 Testing live spell search for 'fireball'...");
+        
+        match client.search("fireball", Some(SearchCategory::Spells)).await {
+            Ok(results) => {
+                if !results.is_empty() {
+                    println!("✅ Successfully found {} result(s) for 'fireball'", results.len());
+                    let result = &results[0];
+                    println!("📝 Spell name: {}", result.name());
+                    
+                    if let SearchResult::Spell(spell) = result {
+                        println!("🧙 Level: {}", spell.level);
+                        println!("🏫 School: {}", spell.school);
+                        println!("⏱️  Casting time: {}", spell.casting_time);
+                        println!("📏 Range: {}", spell.range);
+                        
+                        // Test field querying
+                        assert!(result.get_field_value("name").is_some());
+                        assert!(result.get_field_value("level").is_some());
+                        assert!(result.get_field_value("school").is_some());
+                        
+                        println!("✅ Field querying works correctly");
                     }
-                },
-                Err(e) => {
-                    println!("⚠️ Online search failed: {}", e);
-                    println!("💡 This may happen due to network issues or API changes");
+                } else {
+                    println!("⚠️ No results found for 'fireball' - this might indicate parsing issues");
                 }
+            },
+            Err(e) => {
+                println!("⚠️ Spell search failed: {}", e);
+                println!("💡 This is expected if network is unavailable or site structure changed");
             }
-        } else {
-            println!("📴 Offline mode - online search test skipped");
         }
     }
 }

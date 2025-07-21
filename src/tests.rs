@@ -734,49 +734,41 @@ mod tests {
         let spell_result = SearchResult::Spell(SpellDetail {
             index: "test-spell".to_string(),
             name: "Test Spell".to_string(),
-            level: 1,
-            school: ApiReference {
-                index: "evocation".to_string(),
-                name: "Evocation".to_string(),
-                url: "/magic-schools/evocation".to_string(),
-            },
+            level: "1st-level".to_string(),
+            school: "Evocation".to_string(),
             casting_time: "1 action".to_string(),
             range: "Touch".to_string(),
-            components: vec!["V".to_string()],
+            components: "V".to_string(),
             duration: "Instantaneous".to_string(),
-            description: vec!["Test description".to_string()],
-            higher_level: vec![],
+            description: "Test description".to_string(),
+            higher_level: "".to_string(),
+            spell_lists: "Wizard".to_string(),
         });
         
         let class_result = SearchResult::Class(ClassDetail {
             index: "test-class".to_string(),
             name: "Test Class".to_string(),
-            hit_die: 8,
-            proficiency_choices: vec![],
-            proficiencies: vec![],
-            saving_throws: vec![],
+            hit_die: "1d8".to_string(),
+            proficiencies: "Light armor".to_string(),
+            saving_throws: "Wisdom".to_string(),
+            skills: "Choose two skills".to_string(),
+            equipment: "Starting equipment".to_string(),
         });
         
         let equipment_result = SearchResult::Equipment(EquipmentDetail {
             index: "test-equipment".to_string(),
             name: "Test Equipment".to_string(),
-            equipment_category: ApiReference {
-                index: "weapon".to_string(),
-                name: "Weapon".to_string(),
-                url: "/equipment-categories/weapon".to_string(),
-            },
-            gear_category: None,
-            weapon_category: None,
-            armor_category: None,
-            cost: None,
-            weight: None,
-            description: vec![],
+            category: "Weapon".to_string(),
+            cost: "10 gp".to_string(),
+            weight: "2 lb".to_string(),
+            description: "Test description".to_string(),
+            properties: "Versatile".to_string(),
         });
         
-        let reference_result = SearchResult::Reference(ApiReference {
+        let reference_result = SearchResult::Reference(WikiReference {
             index: "test-reference".to_string(),
             name: "Test Reference".to_string(),
-            url: "/test-references/test".to_string(),
+            url: "http://dnd5e.wikidot.com/test-references/test".to_string(),
         });
         
         // Test field mode decision logic
