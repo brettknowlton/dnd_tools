@@ -1,0 +1,5 @@
+Name: TestNPC
+HP: 20/20
+AC: 14
+Initiative: 15
+Type: NPC

@@ -257,7 +257,7 @@ impl CombatTracker {
 
     pub fn make_saving_throw(&self, combatant_name: &str, ability: &str) -> Result<String, String> {
         use crate::character::AbilityScore;
-        use crate::dice::roll_dice;
+        use crate::dice::roll_dice_with_crits;
 
         if let Some(combatant) = self.get_combatant(combatant_name) {
             let ability_type = match ability.to_lowercase().as_str() {
@@ -277,8 +277,8 @@ impl CombatTracker {
                 0
             };
 
-            match roll_dice("1d20") {
-                Ok((rolls, base_roll)) => {
+            match roll_dice_with_crits("1d20") {
+                Ok((rolls, base_roll, crit_message)) => {
                     let total = base_roll as i32 + modifier as i32;
                     let modifier_str = if modifier >= 0 {
                         format!("+{}", modifier)
@@ -286,8 +286,14 @@ impl CombatTracker {
                         modifier.to_string()
                     };
 
-                    Ok(format!("🎲 {} makes a {} saving throw: {} (d20: {}, modifier: {}) = {}", 
-                              combatant_name, ability_type.name(), total, rolls[0], modifier_str, total))
+                    let mut result = format!("🎲 {} makes a {} saving throw: {} (d20: {}, modifier: {}) = {}", 
+                              combatant_name, ability_type.name(), total, rolls[0], modifier_str, total);
+                    
+                    if let Some(message) = crit_message {
+                        result.push_str(&format!("\n{}", message));
+                    }
+                    
+                    Ok(result)
                 }
                 Err(e) => Err(format!("Error rolling d20: {}", e)),
             }
@@ -375,6 +381,32 @@ impl CombatTracker {
         
         Ok(())
     }
+    
+    pub fn previous_turn(&mut self) -> bool {
+        if self.combatants.is_empty() {
+            return false;
+        }
+        
+        if self.current_turn == 0 {
+            self.current_turn = self.combatants.len() - 1;
+            if self.round_number > 1 {
+                self.round_number -= 1;
+                println!("🔄 Going back to Round {}", self.round_number);
+            }
+        } else {
+            self.current_turn -= 1;
+        }
+        
+        true
+    }
+    
+    pub fn get_current_combatant(&mut self) -> Option<&mut Combatant> {
+        if self.current_turn < self.combatants.len() {
+            Some(&mut self.combatants[self.current_turn])
+        } else {
+            None
+        }
+    }
 }
 
 pub fn enhanced_initiative_setup() -> CombatTracker {
@@ -409,11 +441,17 @@ pub fn enhanced_initiative_setup() -> CombatTracker {
                     
                     if input.is_empty() {
                         // Auto-roll initiative: d20 + DEX modifier
-                        match crate::dice::roll_dice("1d20") {
-                            Ok((rolls, base_roll)) => {
+                        match crate::dice::roll_dice_with_crits("1d20") {
+                            Ok((rolls, base_roll, crit_message)) => {
                                 let initiative = base_roll as i32 + dex_mod as i32;
-                                println!("🎲 Rolled {} (d20: {}, DEX: {}) = {}", 
+                                let mut message = format!("🎲 Rolled {} (d20: {}, DEX: {}) = {}", 
                                         initiative, rolls[0], dex_mod_str, initiative);
+                                
+                                if let Some(crit) = crit_message {
+                                    message.push_str(&format!("\n{}", crit));
+                                }
+                                println!("{}", message);
+                                
                                 let combatant = Combatant::from_character(character.clone(), initiative);
                                 tracker.add_combatant(combatant);
                                 println!("✅ Added {} with initiative {}", character.name, initiative);

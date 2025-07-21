@@ -29,6 +29,23 @@ pub fn roll_dice(input: &str) -> Result<(Vec<u8>, u32), String> {
     Ok((rolls, total))
 }
 
+pub fn roll_dice_with_crits(input: &str) -> Result<(Vec<u8>, u32, Option<String>), String> {
+    let (rolls, total) = roll_dice(input)?;
+    
+    // Check for critical results on d20 rolls
+    let crit_message = if input.contains("d20") && rolls.len() == 1 {
+        match rolls[0] {
+            1 => Some("🎲💀 CRITICAL FAILURE! 💀🎲".to_string()),
+            20 => Some("🎲⭐ CRITICAL SUCCESS! ⭐🎲".to_string()),
+            _ => None,
+        }
+    } else {
+        None
+    };
+    
+    Ok((rolls, total, crit_message))
+}
+
 pub fn roll_dice_mode() {
     println!("Dice Rolling Mode");
     println!("Commands: r<num>d<sides> (e.g., r3d6), q to quit");
@@ -45,12 +62,17 @@ pub fn roll_dice_mode() {
         let input = buffer.trim();
         match input.chars().next() {
             Some('r') => {
-                match roll_dice(input) {
-                    Ok((rolls, total)) => {
+                match roll_dice_with_crits(input) {
+                    Ok((rolls, total, crit_message)) => {
                         for (i, roll) in rolls.iter().enumerate() {
                             println!("Roll {}: {}", i + 1, roll);
                         }
                         println!("Total: {}", total);
+                        
+                        // Display critical message if applicable
+                        if let Some(message) = crit_message {
+                            println!("{}", message);
+                        }
                     }
                     Err(e) => println!("Error: {}", e),
                 }

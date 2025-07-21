@@ -64,6 +64,8 @@ pub struct Cards {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Character {
     pub name: String,
+    pub race: Option<String>,
+    pub class: Option<String>, 
     pub level: Option<u8>,
     pub desc: Option<String>,
     pub ac: Option<u8>,
@@ -89,6 +91,8 @@ impl Character {
     pub fn new(name: &str) -> Character {
         Character {
             name: name.to_string(),
+            race: None,
+            class: None,
             level: None,
             desc: None,
             ac: None,
@@ -174,6 +178,25 @@ impl Character {
 
     /// Check for missing stats and prompt user input
     pub fn ensure_complete_stats(&mut self) {
+        // Check if we should offer autofill-all for missing data
+        let missing_data = self.count_missing_essential_data();
+        if missing_data > 3 {
+            println!("\n⚠️  Missing {} essential stats for {}!", missing_data, self.name);
+            println!("Would you like to autofill all missing stats with defaults? (y/n): ");
+            
+            let mut input = String::new();
+            if std::io::stdin().read_line(&mut input).is_ok() && input.trim().to_lowercase() == "y" {
+                self.autofill_missing_stats();
+                return;
+            }
+        }
+
+        if self.race.is_none() {
+            self.race = Some(self.prompt_for_stat("Race", "Human"));
+        }
+        if self.class.is_none() {
+            self.class = Some(self.prompt_for_stat("Class", "Fighter"));
+        }
         if self.level.is_none() {
             self.level = Some(self.prompt_for_stat("Level", "1").parse().unwrap_or(1));
         }
@@ -226,6 +249,45 @@ impl Character {
         self.update_passive_perception();
     }
 
+    /// Count missing essential data fields
+    fn count_missing_essential_data(&self) -> i32 {
+        let mut missing = 0;
+        if self.race.is_none() { missing += 1; }
+        if self.class.is_none() { missing += 1; }
+        if self.level.is_none() { missing += 1; }
+        if self.stre.is_none() { missing += 1; }
+        if self.dext.is_none() { missing += 1; }
+        if self.cons.is_none() { missing += 1; }
+        if self.wisd.is_none() { missing += 1; }
+        if self.intl.is_none() { missing += 1; }
+        if self.chas.is_none() { missing += 1; }
+        if self.ac.is_none() { missing += 1; }
+        if self.max_hp.is_none() { missing += 1; }
+        if self.speed.is_none() { missing += 1; }
+        missing
+    }
+
+    /// Autofill all missing stats with defaults
+    fn autofill_missing_stats(&mut self) {
+        if self.race.is_none() { self.race = Some("Human".to_string()); }
+        if self.class.is_none() { self.class = Some("Fighter".to_string()); }
+        if self.level.is_none() { self.level = Some(1); }
+        if self.prof_bonus.is_none() { self.prof_bonus = Some(2); }
+        if self.stre.is_none() { self.stre = Some(13); }
+        if self.dext.is_none() { self.dext = Some(12); }
+        if self.cons.is_none() { self.cons = Some(14); }
+        if self.wisd.is_none() { self.wisd = Some(12); }
+        if self.intl.is_none() { self.intl = Some(10); }
+        if self.chas.is_none() { self.chas = Some(11); }
+        if self.ac.is_none() { self.ac = Some(16); }
+        if self.max_hp.is_none() { self.max_hp = Some(12); }
+        if self.hp.is_none() { self.hp = self.max_hp; }
+        if self.speed.is_none() { self.speed = Some(30); }
+        self.update_passive_perception();
+        
+        println!("✅ Autofilled missing stats for {}", self.name);
+    }
+
     fn prompt_for_stat(&self, stat_name: &str, default_value: &str) -> String {
         println!("{} is missing for {}. Enter {} (default: {}): ", 
                  stat_name, self.name, stat_name, default_value);
@@ -246,6 +308,8 @@ impl Character {
     pub fn get_value(&self, key: String) -> String {
         match key.as_str() {
             "name" => self.name.clone(),
+            "race" => self.race.clone().unwrap_or("Unknown".to_string()),
+            "class" => self.class.clone().unwrap_or("Unknown".to_string()),
             "level" => self.level.unwrap_or(0).to_string(),
             "desc" => self.desc.clone().unwrap_or("".to_string()),
             "ac" => self.ac.unwrap_or(0).to_string(),
@@ -269,6 +333,8 @@ impl Character {
     pub fn get_ordered_stats(&self) -> Vec<String> {
         let mut stats = Vec::new();
         stats.push(format!("Name: {}", self.name));
+        stats.push(format!("Race: {}", self.race.as_ref().unwrap_or(&"Unknown".to_string())));
+        stats.push(format!("Class: {}", self.class.as_ref().unwrap_or(&"Unknown".to_string())));
         stats.push(format!("Level: {}", self.level.unwrap_or(0)));
         stats.push(format!(
             "Description: {}",
