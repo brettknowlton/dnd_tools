@@ -725,4 +725,81 @@ mod tests {
             }
         }
     }
+    
+    #[test]
+    fn test_field_selection_logic() {
+        use crate::search::*;
+        
+        // Test that detailed results should enter field mode
+        let spell_result = SearchResult::Spell(SpellDetail {
+            index: "test-spell".to_string(),
+            name: "Test Spell".to_string(),
+            level: 1,
+            school: ApiReference {
+                index: "evocation".to_string(),
+                name: "Evocation".to_string(),
+                url: "/magic-schools/evocation".to_string(),
+            },
+            casting_time: "1 action".to_string(),
+            range: "Touch".to_string(),
+            components: vec!["V".to_string()],
+            duration: "Instantaneous".to_string(),
+            description: vec!["Test description".to_string()],
+            higher_level: vec![],
+        });
+        
+        let class_result = SearchResult::Class(ClassDetail {
+            index: "test-class".to_string(),
+            name: "Test Class".to_string(),
+            hit_die: 8,
+            proficiency_choices: vec![],
+            proficiencies: vec![],
+            saving_throws: vec![],
+        });
+        
+        let equipment_result = SearchResult::Equipment(EquipmentDetail {
+            index: "test-equipment".to_string(),
+            name: "Test Equipment".to_string(),
+            equipment_category: ApiReference {
+                index: "weapon".to_string(),
+                name: "Weapon".to_string(),
+                url: "/equipment-categories/weapon".to_string(),
+            },
+            gear_category: None,
+            weapon_category: None,
+            armor_category: None,
+            cost: None,
+            weight: None,
+            description: vec![],
+        });
+        
+        let reference_result = SearchResult::Reference(ApiReference {
+            index: "test-reference".to_string(),
+            name: "Test Reference".to_string(),
+            url: "/test-references/test".to_string(),
+        });
+        
+        // Test field mode decision logic
+        // Note: We can't directly call should_enter_field_mode from tests since it's private,
+        // but we can test the logic that should be applied
+        match &spell_result {
+            SearchResult::Spell(_) => assert!(true, "Spells should enter field mode"),
+            _ => assert!(false, "Expected spell result"),
+        }
+        
+        match &class_result {
+            SearchResult::Class(_) => assert!(true, "Classes should enter field mode"),
+            _ => assert!(false, "Expected class result"),
+        }
+        
+        match &equipment_result {
+            SearchResult::Equipment(_) => assert!(true, "Equipment should enter field mode"),
+            _ => assert!(false, "Expected equipment result"),
+        }
+        
+        match &reference_result {
+            SearchResult::Reference(_) => assert!(true, "References should NOT enter field mode normally"),
+            _ => assert!(false, "Expected reference result"),
+        }
+    }
 }

@@ -979,6 +979,12 @@ fn search_mode() {
         println!("🌐 Online mode - will attempt to fetch from D&D 5e API");
     }
     
+    // Test network connectivity
+    println!("🔄 Testing API connectivity...");
+    rt.block_on(async {
+        test_api_connectivity(&client).await;
+    });
+    
     loop {
         println!("\n--- Search Menu ---");
         println!("Commands:");
@@ -1168,8 +1174,11 @@ fn display_search_results(results: &[SearchResult]) {
         }
         result.display();
         
-        // Enter interactive field query mode
-        interactive_field_mode(result);
+        // Only enter interactive field query mode for detailed results
+        // References have limited useful fields, so we skip field mode for them
+        if should_enter_field_mode(result) {
+            interactive_field_mode(result);
+        }
     }
     
     if results.len() > 1 {
@@ -1182,6 +1191,15 @@ fn display_search_results(results: &[SearchResult]) {
     println!("\nPress Enter to continue...");
     let mut _buffer = String::new();
     let _ = io::stdin().read_line(&mut _buffer);
+}
+
+fn should_enter_field_mode(result: &SearchResult) -> bool {
+    match result {
+        SearchResult::Spell(_) => true,      // Spells have rich detailed fields
+        SearchResult::Class(_) => true,      // Classes have meaningful proficiency data  
+        SearchResult::Equipment(_) => true,  // Equipment has cost, weight, descriptions
+        SearchResult::Reference(_) => false, // References only have basic name/index/url
+    }
 }
 
 fn interactive_field_mode(result: &SearchResult) {
@@ -1273,4 +1291,41 @@ fn show_search_help() {
     println!("  containing common spells, classes, equipment, and more.");
     println!();
     println!("═══════════════════════════════════════════════════════════");
+}
+
+async fn test_api_connectivity(client: &DndSearchClient) {
+    if client.is_offline() {
+        println!("⚡ Client is in offline mode - skipping network test");
+        return;
+    }
+    
+    // Test a simple API endpoint
+    let test_url = "https://www.dnd5eapi.co/api/spells";
+    
+    match reqwest::Client::new()
+        .get(test_url)
+        .timeout(std::time::Duration::from_secs(5))
+        .send()
+        .await 
+    {
+        Ok(response) => {
+            if response.status().is_success() {
+                println!("✅ API connectivity test successful! Online features available.");
+            } else {
+                println!("⚠️ API responded but with status: {} - limited online functionality", response.status());
+            }
+        },
+        Err(e) => {
+            println!("❌ API connectivity test failed: {}", e);
+            println!("🔄 Will use offline cache as fallback");
+            
+            if e.is_timeout() {
+                println!("💡 Timeout error - the API might be slow or unreachable");
+            } else if e.is_connect() {
+                println!("💡 Connection error - check network connectivity");
+            } else if e.is_request() {
+                println!("💡 Request error - there might be an issue with the request format");
+            }
+        }
+    }
 }
