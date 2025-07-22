@@ -13,6 +13,7 @@ use ratatui::{
 };
 use std::io;
 use crate::character::Character;
+use rand;
 
 #[derive(Debug, Clone)]
 pub enum AppMode {
@@ -20,11 +21,17 @@ pub enum AppMode {
     CharactersMenu,
     ToolsMenu,
     CharacterCreation,
+    CharacterCreationTUI,
     CharacterDisplay,
+    CharacterDisplayTUI,
     CharacterDeletion,
+    CharacterDeletionTUI,
     InitiativeTracker,
+    InitiativeTrackerTUI,
     NpcGenerator,
+    NpcGeneratorTUI,
     Dice,
+    DiceTUI,
     CombatTracker,
     CombatTrackerTUI,
     Search,
@@ -47,6 +54,11 @@ pub struct App {
     pub scroll_offset: usize,
     // Combat tracker state
     pub combat_tracker: Option<crate::combat::CombatTracker>,
+    // State tracking
+    pub current_state: String,
+    pub waiting_for: Option<String>,
+    // Dice rolling state
+    pub dice_results: Vec<String>,
 }
 
 impl App {
@@ -63,6 +75,9 @@ impl App {
             history_index: None,
             scroll_offset: 0,
             combat_tracker: None,
+            current_state: "Ready".to_string(),
+            waiting_for: None,
+            dice_results: Vec::new(),
         }
     }
 
@@ -77,7 +92,9 @@ impl App {
 
     pub fn handle_key(&mut self, key: KeyCode) {
         match self.mode {
-            AppMode::CombatTrackerTUI | AppMode::SearchTUI => {
+            AppMode::CombatTrackerTUI | AppMode::SearchTUI | AppMode::CharacterCreationTUI 
+            | AppMode::CharacterDisplayTUI | AppMode::CharacterDeletionTUI | AppMode::InitiativeTrackerTUI 
+            | AppMode::NpcGeneratorTUI | AppMode::DiceTUI => {
                 self.handle_terminal_key(key);
             }
             _ => {
@@ -86,7 +103,7 @@ impl App {
                     KeyCode::Down => self.next_item(),
                     KeyCode::Enter => self.select_current(),
                     KeyCode::Esc => self.go_back(),
-                    KeyCode::Char('q') => self.should_quit = true,
+                    // Removed auto-quit on 'q' - now requires Ctrl+Q
                     _ => {}
                 }
             }
@@ -125,10 +142,10 @@ impl App {
             }
             AppMode::CharactersMenu => {
                 match self.selected_index {
-                    0 => self.mode = AppMode::CharacterCreation,
-                    1 => self.mode = AppMode::CharacterDisplay,
-                    2 => self.mode = AppMode::CharacterDisplay,
-                    3 => self.mode = AppMode::CharacterDeletion,
+                    0 => self.mode = AppMode::CharacterCreationTUI,
+                    1 => self.mode = AppMode::CharacterDisplayTUI,
+                    2 => self.mode = AppMode::CharacterDisplayTUI,
+                    3 => self.mode = AppMode::CharacterDeletionTUI,
                     4 => {
                         self.mode = AppMode::MainMenu;
                         self.selected_index = 0;
@@ -138,9 +155,9 @@ impl App {
             }
             AppMode::ToolsMenu => {
                 match self.selected_index {
-                    0 => self.mode = AppMode::InitiativeTracker,
-                    1 => self.mode = AppMode::NpcGenerator,
-                    2 => self.mode = AppMode::Dice,
+                    0 => self.mode = AppMode::InitiativeTrackerTUI,
+                    1 => self.mode = AppMode::NpcGeneratorTUI,
+                    2 => self.mode = AppMode::DiceTUI,
                     3 => self.mode = AppMode::CombatTrackerTUI,
                     4 => self.mode = AppMode::SearchTUI,
                     5 => {
@@ -160,25 +177,35 @@ impl App {
                 self.mode = AppMode::MainMenu;
                 self.selected_index = 0;
             }
-            AppMode::CharacterCreation | AppMode::CharacterDisplay | AppMode::CharacterDeletion => {
+            AppMode::CharacterCreation | AppMode::CharacterDisplay | AppMode::CharacterDeletion 
+            | AppMode::CharacterCreationTUI | AppMode::CharacterDisplayTUI | AppMode::CharacterDeletionTUI => {
                 self.mode = AppMode::CharactersMenu;
                 self.selected_index = 0;
+                self.clear_terminal_state();
             }
-            AppMode::InitiativeTracker | AppMode::NpcGenerator | AppMode::Dice | AppMode::CombatTracker | AppMode::Search => {
+            AppMode::InitiativeTracker | AppMode::NpcGenerator | AppMode::Dice | AppMode::CombatTracker | AppMode::Search 
+            | AppMode::InitiativeTrackerTUI | AppMode::NpcGeneratorTUI | AppMode::DiceTUI => {
                 self.mode = AppMode::ToolsMenu;
                 self.selected_index = 0;
+                self.clear_terminal_state();
             }
             AppMode::CombatTrackerTUI | AppMode::SearchTUI => {
                 self.mode = AppMode::ToolsMenu;
                 self.selected_index = 0;
-                // Clear terminal state
-                self.input_buffer.clear();
-                self.output_history.clear();
-                self.scroll_offset = 0;
-                self.combat_tracker = None;
+                self.clear_terminal_state();
             }
             _ => {}
         }
+    }
+
+    fn clear_terminal_state(&mut self) {
+        self.input_buffer.clear();
+        self.output_history.clear();
+        self.scroll_offset = 0;
+        self.combat_tracker = None;
+        self.current_state = "Ready".to_string();
+        self.waiting_for = None;
+        self.dice_results.clear();
     }
 
     fn handle_terminal_key(&mut self, key: KeyCode) {
@@ -233,9 +260,6 @@ impl App {
             KeyCode::Esc => {
                 self.go_back();
             }
-            KeyCode::Char('q') if self.input_buffer.is_empty() => {
-                self.should_quit = true;
-            }
             KeyCode::Char(c) => {
                 self.input_buffer.push(c);
             }
@@ -247,11 +271,51 @@ impl App {
         match self.mode {
             AppMode::CombatTrackerTUI => self.process_combat_command(command),
             AppMode::SearchTUI => self.process_search_command(command),
+            AppMode::CharacterCreationTUI => self.process_character_creation_command(command),
+            AppMode::CharacterDisplayTUI => self.process_character_display_command(command),
+            AppMode::CharacterDeletionTUI => self.process_character_deletion_command(command),
+            AppMode::InitiativeTrackerTUI => self.process_initiative_command(command),
+            AppMode::NpcGeneratorTUI => self.process_npc_generator_command(command),
+            AppMode::DiceTUI => self.process_dice_command(command),
             _ => {}
         }
     }
 
     fn process_combat_command(&mut self, command: String) {
+        // Check if we're waiting for damage input after an attack
+        if let Some(ref waiting) = self.waiting_for.clone() {
+            if waiting.starts_with("damage_for_") {
+                let target_name = waiting.strip_prefix("damage_for_").unwrap();
+                
+                // Try to parse as damage (either dice roll or number)
+                if let Ok(damage) = command.trim().parse::<i32>() {
+                    // Direct damage number
+                    self.process_hit_command(target_name, damage);
+                    self.waiting_for = None;
+                    self.current_state = "Combat Ready".to_string();
+                    return;
+                } else {
+                    // Try as dice roll
+                    match crate::dice::roll_dice_with_crits(&command.trim()) {
+                        Ok((rolls, total, crit_message)) => {
+                            self.add_output(format!("🎲 Damage roll: {} (dice: {:?})", total, rolls));
+                            if let Some(message) = crit_message {
+                                self.add_output(message);
+                            }
+                            self.process_hit_command(target_name, total as i32);
+                            self.waiting_for = None;
+                            self.current_state = "Combat Ready".to_string();
+                            return;
+                        }
+                        Err(_) => {
+                            self.add_output("❌ Invalid damage input. Enter a number or dice expression (e.g., 2d6+3)".to_string());
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+
         let parts: Vec<&str> = command.split_whitespace().collect();
         if parts.is_empty() {
             return;
@@ -264,17 +328,23 @@ impl App {
                 self.add_output("Combat Mode Commands:".to_string());
                 self.add_output("  init - Initialize combat tracker".to_string());
                 self.add_output("  stats [name] - Show character stats".to_string());
+                self.add_output("  attack <target> - Roll attack against target's AC".to_string());
+                self.add_output("  save <stat> [target] - Make saving throw (str/dex/con/int/wis/cha)".to_string());
+                self.add_output("  hit <target> <amount> - Deal direct damage".to_string());
                 self.add_output("  damage <name> <amount> - Apply damage".to_string());
                 self.add_output("  heal <name> <amount> - Heal character".to_string());
+                self.add_output("  status <target> add <status> [rounds] - Add status effect".to_string());
+                self.add_output("  status <target> remove <status> - Remove status effect".to_string());
                 self.add_output("  next|continue - Advance to next combatant".to_string());
                 self.add_output("  search <query> - Search D&D 5e API".to_string());
                 self.add_output("  show|list - Display current initiative order".to_string());
                 self.add_output("  quit|exit - Exit combat mode".to_string());
                 self.add_output("".to_string());
                 self.add_output("Examples:".to_string());
-                self.add_output("  search fireball".to_string());
-                self.add_output("  damage goblin 5".to_string());
-                self.add_output("  heal fighter 8".to_string());
+                self.add_output("  attack goblin".to_string());
+                self.add_output("  save wis fighter".to_string());
+                self.add_output("  hit goblin 8".to_string());
+                self.add_output("  status goblin add poisoned 3".to_string());
             }
             "init" | "initialize" => {
                 self.initialize_combat();
@@ -396,6 +466,56 @@ impl App {
                     self.add_output("No combat initialized. Use 'init' to start combat.".to_string());
                 }
             }
+            "attack" => {
+                if parts.len() >= 2 {
+                    let target_name = parts[1];
+                    self.process_attack_command(target_name);
+                } else {
+                    self.add_output("Usage: attack <target>".to_string());
+                    self.add_output("Example: attack goblin".to_string());
+                }
+            }
+            "save" => {
+                if parts.len() >= 2 {
+                    let ability = parts[1].to_lowercase();
+                    let target = if parts.len() >= 3 { parts[2] } else { "self" };
+                    self.process_save_command(&ability, target);
+                } else {
+                    self.add_output("Usage: save <ability> [target]".to_string());
+                    self.add_output("Abilities: str, dex, con, int, wis, cha".to_string());
+                    self.add_output("Example: save wis goblin".to_string());
+                }
+            }
+            "hit" => {
+                if parts.len() >= 3 {
+                    let target_name = parts[1];
+                    if let Ok(damage_amount) = parts[2].parse::<i32>() {
+                        self.process_hit_command(target_name, damage_amount);
+                    } else {
+                        self.add_output("❌ Invalid damage amount".to_string());
+                    }
+                } else {
+                    self.add_output("Usage: hit <target> <amount>".to_string());
+                    self.add_output("Example: hit goblin 8".to_string());
+                }
+            }
+            "status" => {
+                if parts.len() >= 4 {
+                    let target = parts[1];
+                    let action = parts[2].to_lowercase();
+                    let status_name = parts[3];
+                    let rounds = if parts.len() >= 5 { 
+                        parts[4].parse::<i32>().ok() 
+                    } else { 
+                        None 
+                    };
+                    self.process_status_command(target, &action, status_name, rounds);
+                } else {
+                    self.add_output("Usage: status <target> <add|remove> <status> [rounds]".to_string());
+                    self.add_output("Example: status goblin add poisoned 3".to_string());
+                    self.add_output("Example: status fighter remove stunned".to_string());
+                }
+            }
             "damage" => {
                 if parts.len() >= 3 {
                     let target_name = parts[1];
@@ -466,6 +586,182 @@ impl App {
         }
     }
 
+    fn process_attack_command(&mut self, target_name: &str) {
+        if let Some(ref tracker) = self.combat_tracker {
+            if let Some(target) = tracker.combatants.iter().find(|c| c.name.eq_ignore_ascii_case(target_name)) {
+                let target_ac = target.ac;
+                
+                // Roll d20 for attack
+                match crate::dice::roll_dice_with_crits("1d20") {
+                    Ok((rolls, total, crit_message)) => {
+                        let attack_roll = rolls[0] as i32;
+                        let hit = attack_roll >= target_ac;
+                        
+                        self.add_output(format!("⚔️  Attack Roll: {} (d20: {})", total, attack_roll));
+                        
+                        if let Some(message) = crit_message {
+                            self.add_output(message);
+                        }
+                        
+                        self.add_output(format!("🎯 Target AC: {}", target_ac));
+                        
+                        if hit {
+                            self.add_output("💥 HIT! The attack connects!".to_string());
+                            self.add_output("🎲 Enter damage (e.g., '2d6+3' or just '8'):".to_string());
+                            self.current_state = format!("Waiting for damage against {}", target_name);
+                            self.waiting_for = Some(format!("damage_for_{}", target_name));
+                        } else {
+                            self.add_output("🛡️  MISS! The attack fails to connect.".to_string());
+                        }
+                    }
+                    Err(e) => {
+                        self.add_output(format!("❌ Error rolling attack: {}", e));
+                    }
+                }
+            } else {
+                self.add_output(format!("❌ Target '{}' not found in combat", target_name));
+            }
+        } else {
+            self.add_output("No combat initialized. Use 'init' to start combat.".to_string());
+        }
+    }
+
+    fn process_save_command(&mut self, ability: &str, target: &str) {
+        let ability_full = match ability {
+            "str" => "Strength",
+            "dex" => "Dexterity", 
+            "con" => "Constitution",
+            "int" => "Intelligence",
+            "wis" => "Wisdom",
+            "cha" => "Charisma",
+            _ => {
+                self.add_output("❌ Invalid ability. Use: str, dex, con, int, wis, cha".to_string());
+                return;
+            }
+        };
+
+        let target_name = if target == "self" {
+            if let Some(ref tracker) = self.combat_tracker {
+                if let Some(current) = tracker.combatants.get(tracker.current_turn) {
+                    current.name.clone()
+                } else {
+                    self.add_output("❌ No current combatant".to_string());
+                    return;
+                }
+            } else {
+                self.add_output("No combat initialized.".to_string());
+                return;
+            }
+        } else {
+            target.to_string()
+        };
+
+        if let Some(ref tracker) = self.combat_tracker {
+            if let Some(_combatant) = tracker.combatants.iter().find(|c| c.name.eq_ignore_ascii_case(&target_name)) {
+                // Roll d20 for saving throw
+                match crate::dice::roll_dice_with_crits("1d20") {
+                    Ok((rolls, total, crit_message)) => {
+                        self.add_output(format!("🎲 {} saving throw for {}: {} (d20: {})", 
+                            ability_full, target_name, total, rolls[0]));
+                        
+                        if let Some(message) = crit_message {
+                            self.add_output(message);
+                        }
+                    }
+                    Err(e) => {
+                        self.add_output(format!("❌ Error rolling saving throw: {}", e));
+                    }
+                }
+            } else {
+                self.add_output(format!("❌ Combatant '{}' not found", target_name));
+            }
+        } else {
+            self.add_output("No combat initialized.".to_string());
+        }
+    }
+
+    fn process_hit_command(&mut self, target_name: &str, damage: i32) {
+        if let Some(ref mut tracker) = self.combat_tracker {
+            if let Some(combatant) = tracker.combatants.iter_mut().find(|c| c.name.eq_ignore_ascii_case(target_name)) {
+                let old_hp = combatant.current_hp;
+                combatant.current_hp = (combatant.current_hp - damage).max(0);
+                
+                let mut messages = vec![
+                    format!("⚔️ {} takes {} damage directly! HP: {} → {}", 
+                        combatant.name, damage, old_hp, combatant.current_hp)
+                ];
+                    
+                if combatant.current_hp <= 0 {
+                    messages.push(format!("💀 {} is unconscious/dead!", combatant.name));
+                }
+                
+                for message in messages {
+                    self.add_output(message);
+                }
+            } else {
+                self.add_output(format!("❌ Combatant '{}' not found", target_name));
+            }
+        } else {
+            self.add_output("No combat initialized.".to_string());
+        }
+    }
+
+    fn process_status_command(&mut self, target: &str, action: &str, status_name: &str, rounds: Option<i32>) {
+        let target_name = if target == "self" {
+            if let Some(ref tracker) = self.combat_tracker {
+                if let Some(current) = tracker.combatants.get(tracker.current_turn) {
+                    current.name.clone()
+                } else {
+                    self.add_output("❌ No current combatant".to_string());
+                    return;
+                }
+            } else {
+                self.add_output("No combat initialized.".to_string());
+                return;
+            }
+        } else {
+            target.to_string()
+        };
+
+        if let Some(ref mut tracker) = self.combat_tracker {
+            if let Some(combatant) = tracker.combatants.iter_mut().find(|c| c.name.eq_ignore_ascii_case(&target_name)) {
+                match action {
+                    "add" => {
+                        let status = crate::combat::StatusEffect {
+                            name: status_name.to_string(),
+                            description: None,
+                            duration: rounds,
+                        };
+                        combatant.add_status(status);
+                        
+                        let duration_text = match rounds {
+                            Some(r) => format!(" for {} rounds", r),
+                            None => " (permanent)".to_string(),
+                        };
+                        self.add_output(format!("✅ Added status '{}' to {}{}", 
+                            status_name, target_name, duration_text));
+                    }
+                    "remove" => {
+                        if combatant.remove_status(status_name) {
+                            self.add_output(format!("✅ Removed status '{}' from {}", 
+                                status_name, target_name));
+                        } else {
+                            self.add_output(format!("❌ Status '{}' not found on {}", 
+                                status_name, target_name));
+                        }
+                    }
+                    _ => {
+                        self.add_output("❌ Invalid action. Use 'add' or 'remove'".to_string());
+                    }
+                }
+            } else {
+                self.add_output(format!("❌ Combatant '{}' not found", target_name));
+            }
+        } else {
+            self.add_output("No combat initialized.".to_string());
+        }
+    }
+
     fn process_search_command(&mut self, command: String) {
         let parts: Vec<&str> = command.split_whitespace().collect();
         if parts.is_empty() {
@@ -515,6 +811,444 @@ impl App {
                 self.handle_search_query(&command);
             }
         }
+    }
+
+    fn process_character_creation_command(&mut self, command: String) {
+        let parts: Vec<&str> = command.split_whitespace().collect();
+        let cmd_string = if parts.is_empty() { 
+            String::new() 
+        } else { 
+            parts[0].to_lowercase() 
+        };
+        let cmd = cmd_string.as_str();
+
+        match cmd {
+            "help" | "h" => {
+                self.add_output("Character Creation Commands:".to_string());
+                self.add_output("  create - Start character creation wizard".to_string());
+                self.add_output("  back - Return to characters menu".to_string());
+            }
+            "create" => {
+                self.add_output("🎭 Starting character creation wizard...".to_string());
+                self.add_output("This will guide you through creating a new character.".to_string());
+                self.add_output("Feature coming soon - interactive character creation!".to_string());
+            }
+            "back" | "exit" => {
+                self.mode = AppMode::CharactersMenu;
+                self.selected_index = 0;
+                self.clear_terminal_state();
+            }
+            _ => {
+                self.add_output(format!("Unknown command '{}'. Type 'help' for commands.", cmd));
+            }
+        }
+    }
+
+    fn process_character_display_command(&mut self, command: String) {
+        let parts: Vec<&str> = command.split_whitespace().collect();
+        let cmd_string = if parts.is_empty() { 
+            String::new() 
+        } else { 
+            parts[0].to_lowercase() 
+        };
+        let cmd = cmd_string.as_str();
+
+        match cmd {
+            "help" | "h" => {
+                self.add_output("Character Display Commands:".to_string());
+                self.add_output("  list - List all characters".to_string());
+                self.add_output("  show <name> - Show specific character details".to_string());
+                self.add_output("  back - Return to characters menu".to_string());
+            }
+            "list" => {
+                self.add_output("📋 Available Characters:".to_string());
+                if self.characters.is_empty() {
+                    self.add_output("  No characters found.".to_string());
+                } else {
+                    let character_list: Vec<String> = self.characters.iter().enumerate()
+                        .map(|(i, character)| {
+                            format!("  {}. {} (Level {}, {})", 
+                                i + 1, character.name, 
+                                character.level.unwrap_or(1), 
+                                character.class.as_ref().unwrap_or(&"Unknown".to_string()))
+                        })
+                        .collect();
+                    for line in character_list {
+                        self.add_output(line);
+                    }
+                }
+            }
+            "show" => {
+                if parts.len() >= 2 {
+                    let char_name = parts[1..].join(" ");
+                    let character_data = self.characters.iter()
+                        .find(|c| c.name.eq_ignore_ascii_case(&char_name))
+                        .cloned();
+                    
+                    if let Some(character) = character_data {
+                        self.display_character_details(&character);
+                    } else {
+                        self.add_output(format!("❌ Character '{}' not found", char_name));
+                    }
+                } else {
+                    self.add_output("Usage: show <character_name>".to_string());
+                }
+            }
+            "back" | "exit" => {
+                self.mode = AppMode::CharactersMenu;
+                self.selected_index = 0;
+                self.clear_terminal_state();
+            }
+            _ => {
+                self.add_output(format!("Unknown command '{}'. Type 'help' for commands.", cmd));
+            }
+        }
+    }
+
+    fn process_character_deletion_command(&mut self, command: String) {
+        let parts: Vec<&str> = command.split_whitespace().collect();
+        let cmd_string = if parts.is_empty() { 
+            String::new() 
+        } else { 
+            parts[0].to_lowercase() 
+        };
+        let cmd = cmd_string.as_str();
+
+        match cmd {
+            "help" | "h" => {
+                self.add_output("Character Deletion Commands:".to_string());
+                self.add_output("  list - List all characters".to_string());
+                self.add_output("  delete <name> - Delete specific character".to_string());
+                self.add_output("  back - Return to characters menu".to_string());
+            }
+            "list" => {
+                self.add_output("📋 Characters available for deletion:".to_string());
+                if self.characters.is_empty() {
+                    self.add_output("  No characters found.".to_string());
+                } else {
+                    let character_list: Vec<String> = self.characters.iter().enumerate()
+                        .map(|(i, character)| format!("  {}. {}", i + 1, character.name))
+                        .collect();
+                    for line in character_list {
+                        self.add_output(line);
+                    }
+                }
+            }
+            "delete" => {
+                if parts.len() >= 2 {
+                    let char_name = parts[1..].join(" ");
+                    if let Some(index) = self.characters.iter().position(|c| c.name.eq_ignore_ascii_case(&char_name)) {
+                        let removed = self.characters.remove(index);
+                        self.add_output(format!("🗑️  Deleted character '{}'", removed.name));
+                        crate::file_manager::save_characters(self.characters.clone());
+                    } else {
+                        self.add_output(format!("❌ Character '{}' not found", char_name));
+                    }
+                } else {
+                    self.add_output("Usage: delete <character_name>".to_string());
+                }
+            }
+            "back" | "exit" => {
+                self.mode = AppMode::CharactersMenu;
+                self.selected_index = 0;
+                self.clear_terminal_state();
+            }
+            _ => {
+                self.add_output(format!("Unknown command '{}'. Type 'help' for commands.", cmd));
+            }
+        }
+    }
+
+    fn process_initiative_command(&mut self, command: String) {
+        let parts: Vec<&str> = command.split_whitespace().collect();
+        let cmd_string = if parts.is_empty() { 
+            String::new() 
+        } else { 
+            parts[0].to_lowercase() 
+        };
+        let cmd = cmd_string.as_str();
+
+        match cmd {
+            "help" | "h" => {
+                self.add_output("Initiative Tracker Commands:".to_string());
+                self.add_output("  roll <name> - Roll initiative for character/monster".to_string());
+                self.add_output("  list - Show current initiative order".to_string());
+                self.add_output("  clear - Clear all initiative rolls".to_string());
+                self.add_output("  back - Return to tools menu".to_string());
+            }
+            "roll" => {
+                if parts.len() >= 2 {
+                    let name = parts[1..].join(" ");
+                    match crate::dice::roll_dice_with_crits("1d20") {
+                        Ok((rolls, total, crit_message)) => {
+                            self.add_output(format!("🎲 {} rolled initiative: {} (d20: {})", 
+                                name, total, rolls[0]));
+                            if let Some(message) = crit_message {
+                                self.add_output(message);
+                            }
+                        }
+                        Err(e) => {
+                            self.add_output(format!("❌ Error rolling initiative: {}", e));
+                        }
+                    }
+                } else {
+                    self.add_output("Usage: roll <name>".to_string());
+                }
+            }
+            "list" => {
+                self.add_output("📋 Initiative Order: (Feature coming soon)".to_string());
+            }
+            "clear" => {
+                self.add_output("🧹 Cleared all initiative rolls".to_string());
+            }
+            "back" | "exit" => {
+                self.mode = AppMode::ToolsMenu;
+                self.selected_index = 0;
+                self.clear_terminal_state();
+            }
+            _ => {
+                self.add_output(format!("Unknown command '{}'. Type 'help' for commands.", cmd));
+            }
+        }
+    }
+
+    fn process_npc_generator_command(&mut self, command: String) {
+        let parts: Vec<&str> = command.split_whitespace().collect();
+        let cmd_string = if parts.is_empty() { 
+            String::new() 
+        } else { 
+            parts[0].to_lowercase() 
+        };
+        let cmd = cmd_string.as_str();
+
+        match cmd {
+            "help" | "h" => {
+                self.add_output("NPC Generator Commands:".to_string());
+                self.add_output("  random - Generate completely random NPC".to_string());
+                self.add_output("  custom <race> <class> - Generate NPC with specific race/class".to_string());
+                self.add_output("  races - List available races".to_string());
+                self.add_output("  classes - List available classes".to_string());
+                self.add_output("  back - Return to tools menu".to_string());
+            }
+            "random" => {
+                self.generate_random_npc();
+            }
+            "custom" => {
+                if parts.len() >= 3 {
+                    let race = parts[1];
+                    let class = parts[2];
+                    self.generate_custom_npc(race, class);
+                } else {
+                    self.add_output("Usage: custom <race> <class>".to_string());
+                    self.add_output("Example: custom elf wizard".to_string());
+                }
+            }
+            "races" => {
+                self.add_output("Available Races:".to_string());
+                self.add_output("human, elf, dwarf, halfling, dragonborn, gnome, half-elf, half-orc, tiefling".to_string());
+            }
+            "classes" => {
+                self.add_output("Available Classes:".to_string());
+                self.add_output("fighter, wizard, cleric, rogue, ranger, paladin, barbarian, bard, druid, monk, sorcerer, warlock".to_string());
+            }
+            "back" | "exit" => {
+                self.mode = AppMode::ToolsMenu;
+                self.selected_index = 0;
+                self.clear_terminal_state();
+            }
+            _ => {
+                self.add_output(format!("Unknown command '{}'. Type 'help' for commands.", cmd));
+            }
+        }
+    }
+
+    fn process_dice_command(&mut self, command: String) {
+        let parts: Vec<&str> = command.split_whitespace().collect();
+        let cmd_string = if parts.is_empty() { 
+            String::new() 
+        } else { 
+            parts[0].to_lowercase() 
+        };
+        let cmd = cmd_string.as_str();
+
+        match cmd {
+            "help" | "h" => {
+                self.add_output("🎲 Dice Roller Commands:".to_string());
+                self.add_output("  roll <dice> - Roll dice (e.g., 1d20, 2d6+3, 4d8)".to_string());
+                self.add_output("  advantage - Roll with advantage (2d20, keep higher)".to_string());
+                self.add_output("  disadvantage - Roll with disadvantage (2d20, keep lower)".to_string());
+                self.add_output("  stats - Roll 4d6 drop lowest for ability scores".to_string());
+                self.add_output("  back - Return to tools menu".to_string());
+            }
+            "roll" => {
+                if parts.len() >= 2 {
+                    let dice_expr = parts[1..].join("");
+                    self.roll_dice_with_display(&dice_expr);
+                } else {
+                    self.add_output("Usage: roll <dice_expression>".to_string());
+                    self.add_output("Examples: roll 1d20, roll 2d6+3, roll 4d8".to_string());
+                }
+            }
+            "advantage" => {
+                self.add_output("🎲 Rolling with advantage (2d20, keep higher):".to_string());
+                self.roll_dice_with_display("2d20");
+                self.add_output("📈 Use the HIGHER roll for advantage!".to_string());
+            }
+            "disadvantage" => {
+                self.add_output("🎲 Rolling with disadvantage (2d20, keep lower):".to_string());
+                self.roll_dice_with_display("2d20");
+                self.add_output("📉 Use the LOWER roll for disadvantage!".to_string());
+            }
+            "stats" => {
+                self.add_output("🎲 Rolling ability scores (4d6, drop lowest):".to_string());
+                self.add_output("".to_string());
+                for ability in &["Strength", "Dexterity", "Constitution", "Intelligence", "Wisdom", "Charisma"] {
+                    self.roll_ability_score(ability);
+                }
+            }
+            "back" | "exit" => {
+                self.mode = AppMode::ToolsMenu;
+                self.selected_index = 0;
+                self.clear_terminal_state();
+            }
+            _ => {
+                // Try to interpret as dice roll
+                self.roll_dice_with_display(&command);
+            }
+        }
+    }
+
+    // Helper functions for the new TUI modes
+    fn display_character_details(&mut self, character: &Character) {
+        self.add_output(format!("📋 Character Details: {}", character.name));
+        self.add_output("".to_string());
+        
+        if let Some(level) = character.level {
+            self.add_output(format!("Level: {}", level));
+        }
+        
+        if let Some(class) = &character.class {
+            self.add_output(format!("Class: {}", class));
+        }
+        
+        if let Some(race) = &character.race {
+            self.add_output(format!("Race: {}", race));
+        }
+        
+        self.add_output("".to_string());
+        
+        // Ability Scores
+        self.add_output("Ability Scores:".to_string());
+        if let Some(str_val) = character.stre {
+            self.add_output(format!("  Strength: {} ({})", str_val, character.get_strength_modifier()));
+        }
+        if let Some(dex_val) = character.dext {
+            self.add_output(format!("  Dexterity: {} ({})", dex_val, character.get_dexterity_modifier()));
+        }
+        if let Some(con_val) = character.cons {
+            self.add_output(format!("  Constitution: {} ({})", con_val, character.get_constitution_modifier()));
+        }
+        if let Some(int_val) = character.intl {
+            self.add_output(format!("  Intelligence: {} ({})", int_val, character.get_intelligence_modifier()));
+        }
+        if let Some(wis_val) = character.wisd {
+            self.add_output(format!("  Wisdom: {} ({})", wis_val, character.get_wisdom_modifier()));
+        }
+        if let Some(cha_val) = character.chas {
+            self.add_output(format!("  Charisma: {} ({})", cha_val, character.get_charisma_modifier()));
+        }
+        
+        self.add_output("".to_string());
+        
+        // Combat Stats
+        if let (Some(hp), Some(ac)) = (character.hp, character.ac) {
+            self.add_output(format!("HP: {}, AC: {}", hp, ac));
+        }
+        
+        if let Some(speed) = character.speed {
+            self.add_output(format!("Speed: {} ft", speed));
+        }
+    }
+
+    fn generate_random_npc(&mut self) {
+        use crate::races_classes::{get_random_race, get_random_class};
+        
+        self.add_output("🎲 Generating random NPC...".to_string());
+        
+        let race = get_random_race();
+        let class = get_random_class();
+        let ac = (rand::random::<u8>() % 11) + 10; // 10-20
+        let hp = (rand::random::<u8>() % 41) + 10; // 10-50
+        let speed = ((rand::random::<u8>() % 7) + 2) * 10; // 20-80
+        
+        self.add_output("".to_string());
+        self.add_output("╔═══════════════════════════════════════╗".to_string());
+        self.add_output("║            Generated NPC              ║".to_string());
+        self.add_output("╠═══════════════════════════════════════╣".to_string());
+        self.add_output(format!("║ Race: {:<31} ║", race));
+        self.add_output(format!("║ Class: {:<30} ║", class));
+        self.add_output(format!("║ AC: {:<33} ║", ac));
+        self.add_output(format!("║ HP: {:<33} ║", hp));
+        self.add_output(format!("║ Speed: {} feet{:<21} ║", speed, ""));
+        self.add_output("╚═══════════════════════════════════════╝".to_string());
+    }
+
+    fn generate_custom_npc(&mut self, race: &str, class: &str) {
+        self.add_output(format!("🎲 Generating {} {}...", race, class));
+        
+        let ac = (rand::random::<u8>() % 11) + 10; // 10-20
+        let hp = (rand::random::<u8>() % 41) + 10; // 10-50
+        let speed = ((rand::random::<u8>() % 7) + 2) * 10; // 20-80
+        
+        self.add_output("".to_string());
+        self.add_output("╔═══════════════════════════════════════╗".to_string());
+        self.add_output("║          Generated Custom NPC         ║".to_string());
+        self.add_output("╠═══════════════════════════════════════╣".to_string());
+        self.add_output(format!("║ Race: {:<31} ║", race));
+        self.add_output(format!("║ Class: {:<30} ║", class));
+        self.add_output(format!("║ AC: {:<33} ║", ac));
+        self.add_output(format!("║ HP: {:<33} ║", hp));
+        self.add_output(format!("║ Speed: {} feet{:<21} ║", speed, ""));
+        self.add_output("╚═══════════════════════════════════════╝".to_string());
+    }
+
+    fn roll_dice_with_display(&mut self, dice_expr: &str) {
+        match crate::dice::roll_dice_with_crits(dice_expr) {
+            Ok((rolls, total, crit_message)) => {
+                self.add_output("".to_string());
+                self.add_output("┌─────────────────────────────────┐".to_string());
+                self.add_output("│         🎲 DICE ROLL! 🎲         │".to_string());
+                self.add_output("├─────────────────────────────────┤".to_string());
+                self.add_output(format!("│ Expression: {:<19} │", dice_expr));
+                self.add_output(format!("│ Individual Rolls: {:<13} │", format!("{:?}", rolls)));
+                self.add_output(format!("│ TOTAL: {:<23} │", total));
+                
+                if let Some(message) = crit_message {
+                    self.add_output("├─────────────────────────────────┤".to_string());
+                    self.add_output(format!("│ {:<31} │", message));
+                }
+                
+                self.add_output("└─────────────────────────────────┘".to_string());
+                self.add_output("".to_string());
+            }
+            Err(e) => {
+                self.add_output(format!("❌ Error rolling dice: {}", e));
+                self.add_output("💡 Try format like: 1d20, 2d6+3, 4d8".to_string());
+            }
+        }
+    }
+
+    fn roll_ability_score(&mut self, ability_name: &str) {
+        // Roll 4d6, drop lowest
+        let mut rolls = vec![];
+        for _ in 0..4 {
+            rolls.push((rand::random::<u8>() % 6) + 1);
+        }
+        rolls.sort_by(|a, b| b.cmp(a)); // Sort descending
+        let total: u8 = rolls[0] + rolls[1] + rolls[2]; // Take top 3
+        
+        self.add_output(format!("  {}: {} (rolled: [{}, {}, {}, {}], dropped: {})", 
+            ability_name, total, rolls[0], rolls[1], rolls[2], rolls[3], rolls[3]));
     }
 
     fn add_output(&mut self, text: String) {
@@ -725,138 +1459,70 @@ pub fn run_tui(mut app: App) -> Result<App, Box<dyn std::error::Error>> {
         if let Event::Key(key) = event::read()? {
             if key.kind == KeyEventKind::Press {
                 match key.code {
-                    KeyCode::Char('q') => break,
+                    // Ctrl+Q to quit
+                    KeyCode::Char('q') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => break,
                     _ => app.handle_key(key.code),
                 }
             }
         }
 
-        // Check for mode changes that require CLI fallback
+        // Initialize TUI modes when switching to them
         match app.mode {
             AppMode::Exit => break,
-            AppMode::CharacterCreation => {
-                // Disable TUI temporarily and run CLI
-                disable_raw_mode()?;
-                execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
-                
-                println!("Creating character...");
-                let new_character = crate::input_handler::create_character();
-                app.characters.push(new_character);
-                crate::file_manager::save_characters(app.characters.clone());
-                
-                println!("Press Enter to return to menu...");
-                let mut _buffer = String::new();
-                let _ = std::io::stdin().read_line(&mut _buffer);
-                
-                // Re-enable TUI
-                enable_raw_mode()?;
-                execute!(terminal.backend_mut(), EnterAlternateScreen, EnableMouseCapture)?;
-                
-                app.mode = AppMode::CharactersMenu;
-                app.selected_index = 0;
-                app.message = Some("Character created successfully!".to_string());
-            }
-            AppMode::CharacterDisplay => {
-                // Disable TUI temporarily and run CLI
-                disable_raw_mode()?;
-                execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
-                
-                if app.selected_index == 1 { // Display single
-                    crate::file_manager::display_single_character(&app.characters);
-                } else { // Display all
-                    crate::file_manager::display_all_characters(&app.characters);
+            AppMode::CharacterCreationTUI => {
+                // Initialize character creation TUI
+                if app.output_history.is_empty() {
+                    app.add_output("🎭 Character Creation - Interactive Mode 🎭".to_string());
+                    app.add_output("Type 'help' for available commands or 'create' to start".to_string());
+                    app.current_state = "Character Creation Ready".to_string();
                 }
-                
-                println!("Press Enter to return to menu...");
-                let mut _buffer = String::new();
-                let _ = std::io::stdin().read_line(&mut _buffer);
-                
-                // Re-enable TUI
-                enable_raw_mode()?;
-                execute!(terminal.backend_mut(), EnterAlternateScreen, EnableMouseCapture)?;
-                
-                app.mode = AppMode::CharactersMenu;
-                app.selected_index = 0;
             }
-            AppMode::CharacterDeletion => {
-                // Disable TUI temporarily and run CLI
-                disable_raw_mode()?;
-                execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
-                
-                crate::file_manager::delete_character_menu(&mut app.characters);
-                
-                println!("Press Enter to return to menu...");
-                let mut _buffer = String::new();
-                let _ = std::io::stdin().read_line(&mut _buffer);
-                
-                // Re-enable TUI
-                enable_raw_mode()?;
-                execute!(terminal.backend_mut(), EnterAlternateScreen, EnableMouseCapture)?;
-                
-                app.mode = AppMode::CharactersMenu;
-                app.selected_index = 0;
+            AppMode::CharacterDisplayTUI => {
+                // Initialize character display TUI
+                if app.output_history.is_empty() {
+                    app.add_output("📋 Character Display - Interactive Mode 📋".to_string());
+                    app.add_output("Type 'help' for commands or 'list' to see all characters".to_string());
+                    app.current_state = "Character Display Ready".to_string();
+                }
             }
-            AppMode::InitiativeTracker => {
-                // Disable TUI temporarily and run CLI
-                disable_raw_mode()?;
-                execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
-                
-                crate::initiative::initiative_tracker_mode();
-                
-                println!("Press Enter to return to menu...");
-                let mut _buffer = String::new();
-                let _ = std::io::stdin().read_line(&mut _buffer);
-                
-                // Re-enable TUI
-                enable_raw_mode()?;
-                execute!(terminal.backend_mut(), EnterAlternateScreen, EnableMouseCapture)?;
-                
-                app.mode = AppMode::ToolsMenu;
-                app.selected_index = 0;
+            AppMode::CharacterDeletionTUI => {
+                // Initialize character deletion TUI
+                if app.output_history.is_empty() {
+                    app.add_output("🗑️  Character Deletion - Interactive Mode 🗑️".to_string());
+                    app.add_output("Type 'help' for commands or 'list' to see characters".to_string());
+                    app.current_state = "Character Deletion Ready".to_string();
+                }
             }
-            AppMode::NpcGenerator => {
-                // Disable TUI temporarily and run CLI
-                disable_raw_mode()?;
-                execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
-                
-                // Instead of calling these functions, we should define them in this module
-                // For now, let's create simplified versions that work with the TUI
-                npc_randomizer_tui_mode();
-                
-                println!("Press Enter to return to menu...");
-                let mut _buffer = String::new();
-                let _ = std::io::stdin().read_line(&mut _buffer);
-                
-                // Re-enable TUI
-                enable_raw_mode()?;
-                execute!(terminal.backend_mut(), EnterAlternateScreen, EnableMouseCapture)?;
-                
-                app.mode = AppMode::ToolsMenu;
-                app.selected_index = 0;
+            AppMode::InitiativeTrackerTUI => {
+                // Initialize initiative tracker TUI
+                if app.output_history.is_empty() {
+                    app.add_output("⚡ Initiative Tracker - Interactive Mode ⚡".to_string());
+                    app.add_output("Type 'help' for commands or 'roll <name>' to roll initiative".to_string());
+                    app.current_state = "Initiative Tracker Ready".to_string();
+                }
             }
-            AppMode::Dice => {
-                // Disable TUI temporarily and run CLI
-                disable_raw_mode()?;
-                execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
-                
-                crate::dice::roll_dice_mode();
-                
-                println!("Press Enter to return to menu...");
-                let mut _buffer = String::new();
-                let _ = std::io::stdin().read_line(&mut _buffer);
-                
-                // Re-enable TUI
-                enable_raw_mode()?;
-                execute!(terminal.backend_mut(), EnterAlternateScreen, EnableMouseCapture)?;
-                
-                app.mode = AppMode::ToolsMenu;
-                app.selected_index = 0;
+            AppMode::NpcGeneratorTUI => {
+                // Initialize NPC generator TUI
+                if app.output_history.is_empty() {
+                    app.add_output("🎭 NPC Generator - Interactive Mode 🎭".to_string());
+                    app.add_output("Type 'help' for commands or 'random' to generate an NPC".to_string());
+                    app.current_state = "NPC Generator Ready".to_string();
+                }
+            }
+            AppMode::DiceTUI => {
+                // Initialize dice roller TUI
+                if app.output_history.is_empty() {
+                    app.add_output("🎲 Dice Roller - Interactive Mode 🎲".to_string());
+                    app.add_output("Type 'help' for commands or 'roll 1d20' to start rolling".to_string());
+                    app.current_state = "Dice Roller Ready".to_string();
+                }
             }
             AppMode::CombatTrackerTUI => {
                 // Initialize combat tracker if not already done
                 if app.combat_tracker.is_none() {
                     app.add_output("⚔️ Combat Tracker - Interactive Mode ⚔️".to_string());
                     app.add_output("Type 'init' to initialize combat or 'help' for commands".to_string());
+                    app.current_state = "Combat Tracker Ready".to_string();
                 }
             }
             AppMode::SearchTUI => {
@@ -864,6 +1530,7 @@ pub fn run_tui(mut app: App) -> Result<App, Box<dyn std::error::Error>> {
                 if app.output_history.is_empty() {
                     app.add_output("🔍 D&D 5e Search - Interactive Mode 🔍".to_string());
                     app.add_output("Type 'search <query>' to search or 'help' for commands".to_string());
+                    app.current_state = "Search Ready".to_string();
                 }
             }
             _ => {}
@@ -915,7 +1582,9 @@ pub fn ui(f: &mut Frame, app: &mut App) {
 
     // Main content
     match app.mode {
-        AppMode::CombatTrackerTUI | AppMode::SearchTUI => {
+        AppMode::CombatTrackerTUI | AppMode::SearchTUI | AppMode::CharacterCreationTUI 
+        | AppMode::CharacterDisplayTUI | AppMode::CharacterDeletionTUI | AppMode::InitiativeTrackerTUI 
+        | AppMode::NpcGeneratorTUI | AppMode::DiceTUI => {
             render_terminal_content(f, chunks[1], app);
         }
         _ => {
@@ -1032,6 +1701,8 @@ fn render_output_area(f: &mut Frame, area: Rect, app: &mut App) {
                 vec![
                     "⚔️ Combat Tracker - Interactive Mode ⚔️".to_string(),
                     "".to_string(),
+                    format!("State: {}", app.current_state),
+                    "".to_string(),
                     "Type 'help' for available commands".to_string(),
                     "Type 'init' to initialize combat".to_string(),
                     "".to_string(),
@@ -1041,27 +1712,108 @@ fn render_output_area(f: &mut Frame, area: Rect, app: &mut App) {
                 vec![
                     "🔍 D&D 5e Search - Interactive Mode 🔍".to_string(),
                     "".to_string(),
+                    format!("State: {}", app.current_state),
+                    "".to_string(),
                     "Type 'help' for available commands".to_string(),
                     "Type 'search <query>' to search".to_string(),
                     "Example: search fireball".to_string(),
                     "".to_string(),
                 ]
             },
-            _ => vec!["Ready.".to_string()],
+            AppMode::CharacterCreationTUI => {
+                vec![
+                    "🎭 Character Creation - Interactive Mode 🎭".to_string(),
+                    "".to_string(),
+                    format!("State: {}", app.current_state),
+                    "".to_string(),
+                    "Type 'help' for available commands".to_string(),
+                    "Type 'create' to start character creation".to_string(),
+                    "".to_string(),
+                ]
+            },
+            AppMode::CharacterDisplayTUI => {
+                vec![
+                    "📋 Character Display - Interactive Mode 📋".to_string(),
+                    "".to_string(),
+                    format!("State: {}", app.current_state),
+                    "".to_string(),
+                    "Type 'help' for available commands".to_string(),
+                    "Type 'list' to see all characters".to_string(),
+                    "".to_string(),
+                ]
+            },
+            AppMode::CharacterDeletionTUI => {
+                vec![
+                    "🗑️  Character Deletion - Interactive Mode 🗑️".to_string(),
+                    "".to_string(),
+                    format!("State: {}", app.current_state),
+                    "".to_string(),
+                    "Type 'help' for available commands".to_string(),
+                    "Type 'list' to see characters to delete".to_string(),
+                    "⚠️  Warning: Deletions are permanent!".to_string(),
+                    "".to_string(),
+                ]
+            },
+            AppMode::InitiativeTrackerTUI => {
+                vec![
+                    "⚡ Initiative Tracker - Interactive Mode ⚡".to_string(),
+                    "".to_string(),
+                    format!("State: {}", app.current_state),
+                    "".to_string(),
+                    "Type 'help' for available commands".to_string(),
+                    "Type 'roll <name>' to roll initiative".to_string(),
+                    "".to_string(),
+                ]
+            },
+            AppMode::NpcGeneratorTUI => {
+                vec![
+                    "🎭 NPC Generator - Interactive Mode 🎭".to_string(),
+                    "".to_string(),
+                    format!("State: {}", app.current_state),
+                    "".to_string(),
+                    "Type 'help' for available commands".to_string(),
+                    "Type 'random' to generate a random NPC".to_string(),
+                    "Type 'custom <race> <class>' for custom NPC".to_string(),
+                    "".to_string(),
+                ]
+            },
+            AppMode::DiceTUI => {
+                vec![
+                    "🎲 Dice Roller - Interactive Mode 🎲".to_string(),
+                    "".to_string(),
+                    format!("State: {}", app.current_state),
+                    "".to_string(),
+                    "Type 'help' for available commands".to_string(),
+                    "Type 'roll 1d20' to roll dice".to_string(),
+                    "Examples: roll 2d6+3, roll 4d8, advantage, disadvantage".to_string(),
+                    "".to_string(),
+                ]
+            },
+            _ => vec![format!("State: {}", app.current_state)],
         }
     } else {
-        // Show recent output with scrolling
+        // Show recent output with scrolling, but add state header
+        let mut lines = vec![format!("State: {} {}", app.current_state,
+            if let Some(ref waiting) = app.waiting_for {
+                format!("(Waiting: {})", waiting)
+            } else {
+                "".to_string()
+            }
+        ), "".to_string()];
+        
         let start_index = app.scroll_offset;
         let end_index = std::cmp::min(
             app.output_history.len(),
-            start_index + (area.height as usize).saturating_sub(2)
+            start_index + (area.height as usize).saturating_sub(4) // Leave room for state header
         );
         
         if start_index < app.output_history.len() {
-            app.output_history[start_index..end_index].to_vec()
+            lines.extend_from_slice(&app.output_history[start_index..end_index]);
         } else {
-            app.output_history.clone()
+            lines.extend_from_slice(&app.output_history);
         }
+        
+        lines
     };
 
     let output_text = output_lines.join("\n");
@@ -1101,11 +1853,17 @@ fn get_title_for_mode(mode: &AppMode) -> Text {
         AppMode::CharactersMenu => "👥 Characters Menu 👥",
         AppMode::ToolsMenu => "🛠️  Tools Menu 🛠️",
         AppMode::CharacterCreation => "✨ Character Creation ✨",
+        AppMode::CharacterCreationTUI => "✨ Character Creation (Interactive) ✨",
         AppMode::CharacterDisplay => "📋 Character Display 📋",
+        AppMode::CharacterDisplayTUI => "📋 Character Display (Interactive) 📋",
         AppMode::CharacterDeletion => "🗑️  Character Deletion 🗑️",
+        AppMode::CharacterDeletionTUI => "🗑️  Character Deletion (Interactive) 🗑️",
         AppMode::InitiativeTracker => "⚡ Initiative Tracker ⚡",
+        AppMode::InitiativeTrackerTUI => "⚡ Initiative Tracker (Interactive) ⚡",
         AppMode::NpcGenerator => "🎭 NPC Generator 🎭",
+        AppMode::NpcGeneratorTUI => "🎭 NPC Generator (Interactive) 🎭",
         AppMode::Dice => "🎲 Dice Roller 🎲",
+        AppMode::DiceTUI => "🎲 Dice Roller (Interactive) 🎲",
         AppMode::CombatTracker => "⚔️  Combat Tracker ⚔️",
         AppMode::CombatTrackerTUI => "⚔️  Combat Tracker (Interactive) ⚔️",
         AppMode::Search => "🔍 D&D 5e Search 🔍",
@@ -1118,11 +1876,11 @@ fn get_title_for_mode(mode: &AppMode) -> Text {
 fn get_help_text(mode: &AppMode) -> Text {
     let help = match mode {
         AppMode::MainMenu | AppMode::CharactersMenu | AppMode::ToolsMenu => 
-            "↑↓ Navigate • Enter Select • Esc Back • Q Quit",
-        AppMode::CombatTrackerTUI => 
-            "Type commands • Enter Execute • ↑↓ History • PgUp/PgDn Scroll • Esc Back",
-        AppMode::SearchTUI => 
-            "Type commands • Enter Execute • ↑↓ History • PgUp/PgDn Scroll • Esc Back",
+            "↑↓ Navigate • Enter Select • Esc Back • Ctrl+Q Quit",
+        AppMode::CombatTrackerTUI | AppMode::SearchTUI | AppMode::CharacterCreationTUI 
+        | AppMode::CharacterDisplayTUI | AppMode::CharacterDeletionTUI | AppMode::InitiativeTrackerTUI 
+        | AppMode::NpcGeneratorTUI | AppMode::DiceTUI => 
+            "Type commands • Enter Execute • ↑↓ History • PgUp/PgDn Scroll • Esc Back • Ctrl+Q Quit",
         _ => "Press any key to continue...",
     };
     Text::from(help)
