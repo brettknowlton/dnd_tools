@@ -1220,7 +1220,56 @@ impl App {
                 self.add_output("│         🎲 DICE ROLL! 🎲         │".to_string());
                 self.add_output("├─────────────────────────────────┤".to_string());
                 self.add_output(format!("│ Expression: {:<19} │", dice_expr));
-                self.add_output(format!("│ Individual Rolls: {:<13} │", format!("{:?}", rolls)));
+                
+                // Extract dice type for ASCII art
+                let dice_type = if let Some(d_pos) = dice_expr.find('d') {
+                    let after_d = &dice_expr[d_pos + 1..];
+                    let sides_str = after_d.chars()
+                        .take_while(|c| c.is_ascii_digit())
+                        .collect::<String>();
+                    sides_str.parse::<u8>().unwrap_or(6)
+                } else {
+                    6
+                };
+                
+                // Display ASCII art for each die (limit to 3 dice for space)
+                if rolls.len() <= 3 {
+                    self.add_output("├─────────────────────────────────┤".to_string());
+                    
+                    for (i, &roll) in rolls.iter().enumerate() {
+                        let ascii_art = crate::dice::get_dice_ascii_art(dice_type, roll);
+                        let color = crate::dice::get_dice_color_code(roll, dice_type);
+                        let reset = crate::dice::reset_color();
+                        
+                        self.add_output(format!("│ Die #{} (d{}):{}{}{}│", 
+                            i + 1, dice_type, 
+                            " ".repeat(19 - format!("Die #{} (d{}):", i + 1, dice_type).len()),
+                            color, reset
+                        ));
+                        
+                        for line in ascii_art {
+                            let padded_line = format!("{}{}{}", color, line, reset);
+                            let clean_line_len = line.len();
+                            let padding = if clean_line_len < 31 { 31 - clean_line_len } else { 0 };
+                            self.add_output(format!("│{}{}{} │", 
+                                padded_line, 
+                                " ".repeat(padding),
+                                color
+                            ));
+                        }
+                    }
+                } else {
+                    // For many dice, just show the values with colors
+                    let mut colored_rolls = Vec::new();
+                    for &roll in &rolls {
+                        let color = crate::dice::get_dice_color_code(roll, dice_type);
+                        let reset = crate::dice::reset_color();
+                        colored_rolls.push(format!("{}{}{}", color, roll, reset));
+                    }
+                    self.add_output(format!("│ Rolls: {:<22} │", colored_rolls.join(", ")));
+                }
+                
+                self.add_output("├─────────────────────────────────┤".to_string());
                 self.add_output(format!("│ TOTAL: {:<23} │", total));
                 
                 if let Some(message) = crit_message {
