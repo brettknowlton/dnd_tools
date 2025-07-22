@@ -1,4 +1,6 @@
 use std::io::{self, Write};
+use std::process;
+use crate::search::{DndSearchClient, SearchCategory, SearchResult};
 
 mod character;
 mod file_manager;
@@ -10,10 +12,21 @@ mod error_handling;
 mod combat;
 mod tests;
 mod races_classes;
+mod search;
 
 fn clear_console() {
     print!("\x1B[2J\x1B[1;1H");
     io::stdout().flush().unwrap_or(());
+}
+
+/// Check if input is a universal exit command and exit the program if so
+fn check_universal_exit(input: &str) {
+    let trimmed = input.trim();
+    if trimmed.to_uppercase() == "EXIT" || trimmed.to_uppercase() == "QUIT" {
+        println!("\n🚪 Universal EXIT command detected - terminating program...");
+        println!("Goodbye! 👋");
+        process::exit(0);
+    }
 }
 
 use character::Character;
@@ -44,6 +57,10 @@ fn main() -> io::Result<()> {
         
         let mut buffer = String::new();
         io::stdin().read_line(&mut buffer)?;
+        
+        // Check for universal exit command
+        check_universal_exit(&buffer);
+        
         match buffer.trim() {
             "1" => characters_menu(&mut characters),
             "2" => tools_menu(),
@@ -95,6 +112,7 @@ fn tools_menu() {
         println!("2. NPC randomizer");
         println!("3. Dice");
         println!("4. Combat tracker");
+        println!("5. Search D&D 5e API");
         println!("0. Back to main menu");
         
         let mut buffer = String::new();
@@ -108,6 +126,7 @@ fn tools_menu() {
             "2" => npc_randomizer_mode(),
             "3" => roll_dice_mode(),
             "4" => combat_tracker_mode(),
+            "5" => search_mode(),
             "0" => break,
             _ => println!("Invalid input"),
         }
@@ -933,4 +952,306 @@ fn handle_insert_combatant(combat_tracker: &mut CombatTracker, name: &str) {
     }
     
     combat_tracker.display_initiative_order();
+}
+
+fn search_mode() {
+    println!("\n🔍 D&D 5e Wikidot Search Tool 🔍");
+    println!("═══════════════════════════════════════════════════════════");
+    println!("Search for spells, classes, equipment, monsters, and races");
+    println!("Powered by http://dnd5e.wikidot.com - Live data from the web!");
+    println!("═══════════════════════════════════════════════════════════");
+    
+    // Create runtime for async operations
+    let rt = match tokio::runtime::Runtime::new() {
+        Ok(runtime) => runtime,
+        Err(e) => {
+            println!("❌ Failed to create async runtime: {}", e);
+            println!("Search functionality unavailable.");
+            return;
+        }
+    };
+    
+    let client = DndSearchClient::new();
+    
+    println!("🌐 Online mode - connecting to Wikidot D&D 5e site");
+    
+    // Test network connectivity
+    println!("🔄 Testing API connectivity...");
+    rt.block_on(async {
+        test_api_connectivity(&client).await;
+    });
+    
+    loop {
+        println!("\n--- Search Menu ---");
+        println!("Commands:");
+        println!("  search <query> - Search all categories");
+        println!("  search <category> <query> - Search specific category");
+        println!("  categories - List available categories");
+        println!("  help - Show detailed help");
+        println!("  back - Return to tools menu");
+        println!("  EXIT - Quit program immediately");
+        println!();
+        print!("Search > ");
+        io::stdout().flush().unwrap_or(());
+        
+        let mut input = String::new();
+        if io::stdin().read_line(&mut input).is_err() {
+            println!("Failed to read input");
+            continue;
+        }
+        
+        let input = input.trim();
+        
+        // Check for universal exit command
+        check_universal_exit(input);
+        
+        if input.is_empty() {
+            continue;
+        }
+        
+        let parts: Vec<&str> = input.split_whitespace().collect();
+        let command = parts[0].to_lowercase();
+        
+        match command.as_str() {
+            "search" => {
+                if parts.len() < 2 {
+                    println!("Usage: search <query> or search <category> <query>");
+                    continue;
+                }
+                
+                let (category, query) = if parts.len() == 2 {
+                    // search <query>
+                    (None, parts[1].to_string())
+                } else {
+                    // search <category> <query>
+                    let potential_category = SearchCategory::from_str(parts[1]);
+                    if potential_category.is_some() {
+                        (potential_category, parts[2..].join(" "))
+                    } else {
+                        // Treat first argument as part of query
+                        (None, parts[1..].join(" "))
+                    }
+                };
+                
+                rt.block_on(async {
+                    handle_search_command(&client, &query, category).await;
+                });
+            },
+            "categories" => {
+                println!("\nAvailable Categories:");
+                println!("  • spells - Magic spells");
+                println!("  • classes - Character classes");
+                println!("  • equipment (or items/gear) - Weapons, armor, and gear");
+                println!("  • monsters (or creatures) - Monsters and NPCs");
+                println!("  • races - Character races");
+                println!("\nExample usage:");
+                println!("  search fireball");
+                println!("  search spell fireball");
+                println!("  search equipment longsword");
+            },
+            "help" => {
+                show_search_help();
+            },
+            "back" => {
+                println!("Returning to tools menu...");
+                break;
+            },
+            _ => {
+                // Try to interpret the entire input as a search query
+                rt.block_on(async {
+                    handle_search_command(&client, input, None).await;
+                });
+            }
+        }
+    }
+}
+
+async fn handle_search_command(client: &DndSearchClient, query: &str, category: Option<SearchCategory>) {
+    println!("🔍 Searching for '{}'...", query);
+    
+    match client.search(query, category).await {
+        Ok(results) => {
+            if results.is_empty() {
+                // No exact match found, get suggestions
+                println!("❌ No exact match found for '{}'", query);
+                
+                let suggestions = client.get_suggestions(query, category).await;
+                
+                if suggestions.is_empty() {
+                    println!("🔍 No similar items found either.");
+                    if let Some(_cat) = category {
+                        println!("💡 Try searching in a different category or check your spelling");
+                    } else {
+                        println!("💡 Try specifying a category: search <category> <query>");
+                        println!("   Example: search spell {}", query);
+                    }
+                } else {
+                    println!("🔍 Here are some suggestions that might be what you're looking for:");
+                    println!("   (These are the closest matches found)");
+                    println!();
+                    
+                    for (i, suggestion) in suggestions.iter().enumerate() {
+                        println!("  {}. {} 📝", i + 1, suggestion);
+                    }
+                    
+                    println!();
+                    println!("💡 Would you like to search for one of these suggestions?");
+                    println!("   Enter the number of your choice (1-{}), or press Enter to skip:", suggestions.len());
+                    print!("Choice > ");
+                    io::stdout().flush().unwrap_or(());
+                    
+                    let mut choice_input = String::new();
+                    if io::stdin().read_line(&mut choice_input).is_ok() {
+                        let choice_input = choice_input.trim();
+                        
+                        // Check for universal exit command
+                        check_universal_exit(choice_input);
+                        
+                        if !choice_input.is_empty() {
+                            if let Ok(choice) = choice_input.parse::<usize>() {
+                                if choice > 0 && choice <= suggestions.len() {
+                                    let selected = &suggestions[choice - 1];
+                                    println!("🔍 Searching for '{}'...", selected);
+                                    
+                                    // Search again with the selected suggestion
+                                    match client.search(selected, category).await {
+                                        Ok(suggestion_results) => {
+                                            if suggestion_results.is_empty() {
+                                                println!("❌ No detailed results found for '{}'", selected);
+                                            } else {
+                                                display_search_results(&suggestion_results);
+                                            }
+                                        },
+                                        Err(e) => {
+                                            println!("❌ Error searching for suggestion: {}", e);
+                                        }
+                                    }
+                                } else {
+                                    println!("❌ Invalid choice. Please select a number between 1 and {}", suggestions.len());
+                                }
+                            } else {
+                                println!("❌ Invalid input. Please enter a number or press Enter to skip.");
+                            }
+                        } else {
+                            println!("👍 Skipping suggestions.");
+                        }
+                    }
+                }
+            } else {
+                display_search_results(&results);
+            }
+        },
+        Err(e) => {
+            println!("❌ Search failed: {}", e);
+            println!("💡 This might be due to network issues. The search will fall back to cached data.");
+            
+            // Still try to show suggestions even if the main search failed
+            println!("🔍 Checking for suggestions in cached data...");
+            let suggestions = client.get_suggestions(query, category).await;
+            
+            if !suggestions.is_empty() {
+                println!("📝 Found these similar items in cached data:");
+                for (i, suggestion) in suggestions.iter().enumerate() {
+                    println!("  {}. {}", i + 1, suggestion);
+                }
+                
+                println!("\nTry searching for one of these when the network is available.");
+            }
+        }
+    }
+}
+
+fn display_search_results(results: &[SearchResult]) {
+    println!("✅ Found {} result(s):", results.len());
+    
+    for (i, result) in results.iter().enumerate() {
+        if results.len() > 1 {
+            println!("\n--- Result {} ---", i + 1);
+        }
+        result.display();
+    }
+    
+    if results.len() > 1 {
+        println!("\n📋 Summary:");
+        for (i, result) in results.iter().enumerate() {
+            println!("  {}. {} ({})", i + 1, result.name(), result.index());
+        }
+    }
+    
+    println!("\nPress Enter to continue...");
+    let mut _buffer = String::new();
+    let _ = io::stdin().read_line(&mut _buffer);
+}
+
+fn show_search_help() {
+    println!("\n📖 D&D 5e Wikidot Search Help 📖");
+    println!("═══════════════════════════════════════════════════════════");
+    println!();
+    println!("BASIC USAGE:");
+    println!("  search <query>              - Search all categories");
+    println!("  search <category> <query>   - Search specific category");
+    println!();
+    println!("CATEGORIES:");
+    println!("  spells      - Magic spells (e.g., fireball, cure wounds)");
+    println!("  classes     - Character classes (e.g., fighter, wizard)");
+    println!("  equipment   - Items, weapons, armor (e.g., longsword, leather armor)");
+    println!("  monsters    - Creatures and NPCs (e.g., goblin, dragon)");
+    println!("  races       - Character races (e.g., elf, dwarf)");
+    println!();
+    println!("EXAMPLES:");
+    println!("  search fireball");
+    println!("  search spell magic missile");
+    println!("  search class paladin");
+    println!("  search equipment chain mail");
+    println!("  search monster troll");
+    println!("  search race halfling");
+    println!();
+    println!("FEATURES:");
+    println!("  • Live data fetching from dnd5e.wikidot.com");
+    println!("  • Complete page content displayed with nice formatting");
+    println!("  • Smart query variations for better match finding");
+    println!("  • Case-insensitive search with flexible input parsing");
+    println!("  • Universal EXIT command works from any prompt");
+    println!();
+    println!("INPUT REQUIREMENTS:");
+    println!("  • All commands must end with pressing Enter (newline)");
+    println!("  • This prevents the program from hanging on input prompts");
+    println!();
+    println!("NETWORK:");
+    println!("  The tool fetches live data from the D&D 5e Wikidot community site.");
+    println!("  Internet connection is required for search functionality.");
+    println!("  All content is sourced from the community-maintained wiki.");
+    println!();
+    println!("═══════════════════════════════════════════════════════════");
+}
+
+async fn test_api_connectivity(client: &DndSearchClient) {
+    // Test basic connectivity to Wikidot
+    let test_url = "http://dnd5e.wikidot.com/spell:fireball";
+    
+    match reqwest::Client::new()
+        .get(test_url)
+        .timeout(std::time::Duration::from_secs(5))
+        .send()
+        .await 
+    {
+        Ok(response) => {
+            if response.status().is_success() {
+                println!("✅ Wikidot connectivity test successful! Online features available.");
+            } else {
+                println!("⚠️ Wikidot responded but with status: {} - limited online functionality", response.status());
+            }
+        },
+        Err(e) => {
+            println!("❌ Wikidot connectivity test failed: {}", e);
+            
+            if e.is_timeout() {
+                println!("💡 Timeout error - the site might be slow or unreachable");
+            } else if e.is_connect() {
+                println!("💡 Connection error - check network connectivity");
+            } else if e.is_request() {
+                println!("💡 Request error - there might be an issue with the request format");
+            }
+        }
+    }
 }
