@@ -5,7 +5,7 @@ Add ASCII art for dice rolls in the TUI.
 Shapes:
 d4: Triangle
 d6: Square
-d8: Octahedron
+d8: Octahedron (a polyhedron with eight triangular faces)
 d10: Pentagon
 d12: Decagon
 d20: Hexagonal design inside a hexagon
