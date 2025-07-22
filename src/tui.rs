@@ -26,7 +26,9 @@ pub enum AppMode {
     NpcGenerator,
     Dice,
     CombatTracker,
+    CombatTrackerTUI,
     Search,
+    SearchTUI,
     Exit,
 }
 
@@ -37,6 +39,14 @@ pub struct App {
     pub characters: Vec<Character>,
     pub should_quit: bool,
     pub message: Option<String>,
+    // TUI terminal fields
+    pub input_buffer: String,
+    pub output_history: Vec<String>,
+    pub command_history: Vec<String>,
+    pub history_index: Option<usize>,
+    pub scroll_offset: usize,
+    // Combat tracker state
+    pub combat_tracker: Option<crate::combat::CombatTracker>,
 }
 
 impl App {
@@ -47,6 +57,12 @@ impl App {
             characters,
             should_quit: false,
             message: None,
+            input_buffer: String::new(),
+            output_history: Vec::new(),
+            command_history: Vec::new(),
+            history_index: None,
+            scroll_offset: 0,
+            combat_tracker: None,
         }
     }
 
@@ -60,13 +76,20 @@ impl App {
     }
 
     pub fn handle_key(&mut self, key: KeyCode) {
-        match key {
-            KeyCode::Up => self.previous_item(),
-            KeyCode::Down => self.next_item(),
-            KeyCode::Enter => self.select_current(),
-            KeyCode::Esc => self.go_back(),
-            KeyCode::Char('q') => self.should_quit = true,
-            _ => {}
+        match self.mode {
+            AppMode::CombatTrackerTUI | AppMode::SearchTUI => {
+                self.handle_terminal_key(key);
+            }
+            _ => {
+                match key {
+                    KeyCode::Up => self.previous_item(),
+                    KeyCode::Down => self.next_item(),
+                    KeyCode::Enter => self.select_current(),
+                    KeyCode::Esc => self.go_back(),
+                    KeyCode::Char('q') => self.should_quit = true,
+                    _ => {}
+                }
+            }
         }
     }
 
@@ -118,8 +141,8 @@ impl App {
                     0 => self.mode = AppMode::InitiativeTracker,
                     1 => self.mode = AppMode::NpcGenerator,
                     2 => self.mode = AppMode::Dice,
-                    3 => self.mode = AppMode::CombatTracker,
-                    4 => self.mode = AppMode::Search,
+                    3 => self.mode = AppMode::CombatTrackerTUI,
+                    4 => self.mode = AppMode::SearchTUI,
                     5 => {
                         self.mode = AppMode::MainMenu;
                         self.selected_index = 0;
@@ -145,8 +168,254 @@ impl App {
                 self.mode = AppMode::ToolsMenu;
                 self.selected_index = 0;
             }
+            AppMode::CombatTrackerTUI | AppMode::SearchTUI => {
+                self.mode = AppMode::ToolsMenu;
+                self.selected_index = 0;
+                // Clear terminal state
+                self.input_buffer.clear();
+                self.output_history.clear();
+                self.scroll_offset = 0;
+                self.combat_tracker = None;
+            }
             _ => {}
         }
+    }
+
+    fn handle_terminal_key(&mut self, key: KeyCode) {
+        match key {
+            KeyCode::Enter => {
+                if !self.input_buffer.trim().is_empty() {
+                    let command = self.input_buffer.trim().to_string();
+                    self.command_history.push(command.clone());
+                    self.history_index = None;
+                    self.process_terminal_command(command);
+                    self.input_buffer.clear();
+                }
+            }
+            KeyCode::Backspace => {
+                self.input_buffer.pop();
+            }
+            KeyCode::Up => {
+                if !self.command_history.is_empty() {
+                    if let Some(index) = self.history_index {
+                        if index > 0 {
+                            self.history_index = Some(index - 1);
+                        }
+                    } else {
+                        self.history_index = Some(self.command_history.len() - 1);
+                    }
+                    if let Some(index) = self.history_index {
+                        self.input_buffer = self.command_history[index].clone();
+                    }
+                }
+            }
+            KeyCode::Down => {
+                if let Some(index) = self.history_index {
+                    if index < self.command_history.len() - 1 {
+                        self.history_index = Some(index + 1);
+                        self.input_buffer = self.command_history[index + 1].clone();
+                    } else {
+                        self.history_index = None;
+                        self.input_buffer.clear();
+                    }
+                }
+            }
+            KeyCode::PageUp => {
+                if self.scroll_offset > 0 {
+                    self.scroll_offset = self.scroll_offset.saturating_sub(5);
+                }
+            }
+            KeyCode::PageDown => {
+                if self.scroll_offset + 10 < self.output_history.len() {
+                    self.scroll_offset += 5;
+                }
+            }
+            KeyCode::Esc => {
+                self.go_back();
+            }
+            KeyCode::Char('q') if self.input_buffer.is_empty() => {
+                self.should_quit = true;
+            }
+            KeyCode::Char(c) => {
+                self.input_buffer.push(c);
+            }
+            _ => {}
+        }
+    }
+
+    fn process_terminal_command(&mut self, command: String) {
+        match self.mode {
+            AppMode::CombatTrackerTUI => self.process_combat_command(command),
+            AppMode::SearchTUI => self.process_search_command(command),
+            _ => {}
+        }
+    }
+
+    fn process_combat_command(&mut self, command: String) {
+        let parts: Vec<&str> = command.split_whitespace().collect();
+        if parts.is_empty() {
+            return;
+        }
+
+        let cmd = parts[0].to_lowercase();
+        
+        match cmd.as_str() {
+            "help" | "h" => {
+                self.add_output("Combat Mode Commands:".to_string());
+                self.add_output("  stats [name] - Show character stats".to_string());
+                self.add_output("  attack <target> - Roll d20 attack vs target's AC".to_string());
+                self.add_output("  status [add|remove|list] [self|name] <status> - Manage status effects".to_string());
+                self.add_output("  search <query> - Search D&D 5e API".to_string());
+                self.add_output("  save [ability] [self|name] - Make saving throw".to_string());
+                self.add_output("  next|continue - Advance to next combatant".to_string());
+                self.add_output("  back - Go back to previous combatant's turn".to_string());
+                self.add_output("  insert <name> - Add new combatant mid-fight".to_string());
+                self.add_output("  remove <name> - Remove combatant from combat".to_string());
+                self.add_output("  show|list - Display current initiative order".to_string());
+                self.add_output("  quit|exit - Exit combat mode".to_string());
+            }
+            "init" | "initialize" => {
+                self.initialize_combat();
+            }
+            "search" => {
+                if let Some(_query) = parts.get(1) {
+                    let full_query = parts[1..].join(" ");
+                    self.handle_combat_search(&full_query);
+                } else {
+                    self.add_output("Usage: search <query>".to_string());
+                    self.add_output("Example: search fireball".to_string());
+                }
+            }
+            "quit" | "exit" | "q" => {
+                self.add_output("Exiting combat mode...".to_string());
+                self.mode = AppMode::ToolsMenu;
+                self.selected_index = 0;
+                self.input_buffer.clear();
+                self.output_history.clear();
+                self.scroll_offset = 0;
+                self.combat_tracker = None;
+            }
+            "show" | "list" => {
+                if let Some(ref tracker) = self.combat_tracker {
+                    let mut lines = vec!["Initiative Order:".to_string()];
+                    for (i, combatant) in tracker.combatants.iter().enumerate() {
+                        let marker = if i == tracker.current_turn { "►" } else { " " };
+                        let status_text = if combatant.status_effects.is_empty() {
+                            "".to_string()
+                        } else {
+                            format!(" [{}]", combatant.status_effects.iter()
+                                .map(|s| s.name.as_str()).collect::<Vec<_>>().join(", "))
+                        };
+                        lines.push(format!("{} {}. {} (Init: {}, HP: {}/{}, AC: {}){}",
+                            marker, i + 1, combatant.name, combatant.initiative,
+                            combatant.current_hp, combatant.max_hp, combatant.ac, status_text));
+                    }
+                    for line in lines {
+                        self.add_output(line);
+                    }
+                } else {
+                    self.add_output("No combat initialized. Use 'init' to start combat.".to_string());
+                }
+            }
+            _ => {
+                if self.combat_tracker.is_some() {
+                    // Handle other combat commands
+                    self.add_output(format!("Unknown command '{}'. Type 'help' for available commands.", cmd));
+                } else {
+                    self.add_output("No combat initialized. Use 'init' to start combat.".to_string());
+                }
+            }
+        }
+    }
+
+    fn process_search_command(&mut self, command: String) {
+        let parts: Vec<&str> = command.split_whitespace().collect();
+        if parts.is_empty() {
+            return;
+        }
+
+        let cmd = parts[0].to_lowercase();
+        
+        match cmd.as_str() {
+            "help" | "h" => {
+                self.add_output("Search Commands:".to_string());
+                self.add_output("  search <query> - Search all categories".to_string());
+                self.add_output("  search <category> <query> - Search specific category".to_string());
+                self.add_output("  categories - List available categories".to_string());
+                self.add_output("  back - Return to tools menu".to_string());
+                self.add_output("".to_string());
+                self.add_output("Categories: spells, classes, equipment, monsters, races".to_string());
+                self.add_output("Example: search fireball".to_string());
+                self.add_output("Example: search spell magic missile".to_string());
+            }
+            "search" => {
+                if let Some(_query) = parts.get(1) {
+                    let full_query = parts[1..].join(" ");
+                    self.handle_search_query(&full_query);
+                } else {
+                    self.add_output("Usage: search <query> or search <category> <query>".to_string());
+                }
+            }
+            "categories" => {
+                self.add_output("Available Categories:".to_string());
+                self.add_output("  • spells - Magic spells".to_string());
+                self.add_output("  • classes - Character classes".to_string());
+                self.add_output("  • equipment (or items/gear) - Weapons, armor, and gear".to_string());
+                self.add_output("  • monsters (or creatures) - Monsters and NPCs".to_string());
+                self.add_output("  • races - Character races".to_string());
+            }
+            "back" | "exit" | "quit" => {
+                self.add_output("Returning to tools menu...".to_string());
+                self.mode = AppMode::ToolsMenu;
+                self.selected_index = 0;
+                self.input_buffer.clear();
+                self.output_history.clear();
+                self.scroll_offset = 0;
+            }
+            _ => {
+                // Try to interpret the entire command as a search query
+                self.handle_search_query(&command);
+            }
+        }
+    }
+
+    fn add_output(&mut self, text: String) {
+        self.output_history.push(text);
+        // Auto-scroll to bottom
+        if self.output_history.len() > 10 {
+            self.scroll_offset = self.output_history.len().saturating_sub(10);
+        }
+    }
+
+    fn initialize_combat(&mut self) {
+        self.add_output("⚔️ Enhanced Combat Tracker ⚔️".to_string());
+        self.add_output("Initializing combat setup...".to_string());
+        
+        // For now, create an empty combat tracker
+        // In a full implementation, we'd need to set up combatants
+        self.combat_tracker = Some(crate::combat::CombatTracker {
+            combatants: Vec::new(),
+            current_turn: 0,
+            round_number: 1,
+        });
+        
+        self.add_output("Combat initialized! Add combatants or type 'help' for commands.".to_string());
+    }
+
+    fn handle_combat_search(&mut self, query: &str) {
+        self.add_output(format!("🔍 Searching for '{}'...", query));
+        // For now, just show a placeholder
+        // In a full implementation, this would use the search functionality
+        self.add_output("Search functionality will be implemented here.".to_string());
+        self.add_output("This would integrate with the D&D 5e API.".to_string());
+    }
+
+    fn handle_search_query(&mut self, query: &str) {
+        self.add_output(format!("🔍 Searching for '{}'...", query));
+        // For now, just show a placeholder
+        // In a full implementation, this would use the search functionality
+        self.add_output("Search functionality will be implemented here.".to_string());
+        self.add_output("This would integrate with the D&D 5e API and show results.".to_string());
     }
 }
 
@@ -300,41 +569,19 @@ pub fn run_tui(mut app: App) -> Result<App, Box<dyn std::error::Error>> {
                 app.mode = AppMode::ToolsMenu;
                 app.selected_index = 0;
             }
-            AppMode::CombatTracker => {
-                // Disable TUI temporarily and run CLI - this will include search functionality
-                disable_raw_mode()?;
-                execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
-                
-                combat_tracker_tui_mode();
-                
-                println!("Press Enter to return to menu...");
-                let mut _buffer = String::new();
-                let _ = std::io::stdin().read_line(&mut _buffer);
-                
-                // Re-enable TUI
-                enable_raw_mode()?;
-                execute!(terminal.backend_mut(), EnterAlternateScreen, EnableMouseCapture)?;
-                
-                app.mode = AppMode::ToolsMenu;
-                app.selected_index = 0;
+            AppMode::CombatTrackerTUI => {
+                // Initialize combat tracker if not already done
+                if app.combat_tracker.is_none() {
+                    app.add_output("⚔️ Combat Tracker - Interactive Mode ⚔️".to_string());
+                    app.add_output("Type 'init' to initialize combat or 'help' for commands".to_string());
+                }
             }
-            AppMode::Search => {
-                // Disable TUI temporarily and run CLI
-                disable_raw_mode()?;
-                execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
-                
-                search_tui_mode();
-                
-                println!("Press Enter to return to menu...");
-                let mut _buffer = String::new();
-                let _ = std::io::stdin().read_line(&mut _buffer);
-                
-                // Re-enable TUI
-                enable_raw_mode()?;
-                execute!(terminal.backend_mut(), EnterAlternateScreen, EnableMouseCapture)?;
-                
-                app.mode = AppMode::ToolsMenu;
-                app.selected_index = 0;
+            AppMode::SearchTUI => {
+                // Initialize search mode
+                if app.output_history.is_empty() {
+                    app.add_output("🔍 D&D 5e Search - Interactive Mode 🔍".to_string());
+                    app.add_output("Type 'search <query>' to search or 'help' for commands".to_string());
+                }
             }
             _ => {}
         }
@@ -384,7 +631,14 @@ pub fn ui(f: &mut Frame, app: &mut App) {
     f.render_widget(title_paragraph, chunks[0]);
 
     // Main content
-    render_main_content(f, chunks[1], app);
+    match app.mode {
+        AppMode::CombatTrackerTUI | AppMode::SearchTUI => {
+            render_terminal_content(f, chunks[1], app);
+        }
+        _ => {
+            render_main_content(f, chunks[1], app);
+        }
+    }
 
     // Help text
     let help_text = get_help_text(&app.mode);
@@ -471,6 +725,93 @@ fn render_main_content(f: &mut Frame, area: Rect, app: &mut App) {
     f.render_widget(list, area);
 }
 
+fn render_terminal_content(f: &mut Frame, area: Rect, app: &mut App) {
+    // Create layout for terminal: output area and input area
+    let terminal_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Min(10),     // Output area (scrollable)
+            Constraint::Length(3),   // Input area
+        ])
+        .split(area);
+
+    // Render output area
+    render_output_area(f, terminal_chunks[0], app);
+    
+    // Render input area
+    render_input_area(f, terminal_chunks[1], app);
+}
+
+fn render_output_area(f: &mut Frame, area: Rect, app: &mut App) {
+    let output_lines = if app.output_history.is_empty() {
+        match app.mode {
+            AppMode::CombatTrackerTUI => {
+                vec![
+                    "⚔️ Combat Tracker - Interactive Mode ⚔️".to_string(),
+                    "".to_string(),
+                    "Type 'help' for available commands".to_string(),
+                    "Type 'init' to initialize combat".to_string(),
+                    "".to_string(),
+                ]
+            },
+            AppMode::SearchTUI => {
+                vec![
+                    "🔍 D&D 5e Search - Interactive Mode 🔍".to_string(),
+                    "".to_string(),
+                    "Type 'help' for available commands".to_string(),
+                    "Type 'search <query>' to search".to_string(),
+                    "Example: search fireball".to_string(),
+                    "".to_string(),
+                ]
+            },
+            _ => vec!["Ready.".to_string()],
+        }
+    } else {
+        // Show recent output with scrolling
+        let start_index = app.scroll_offset;
+        let end_index = std::cmp::min(
+            app.output_history.len(),
+            start_index + (area.height as usize).saturating_sub(2)
+        );
+        
+        if start_index < app.output_history.len() {
+            app.output_history[start_index..end_index].to_vec()
+        } else {
+            app.output_history.clone()
+        }
+    };
+
+    let output_text = output_lines.join("\n");
+    let output_paragraph = Paragraph::new(output_text)
+        .style(Style::default().fg(TEXT_COLOR))
+        .wrap(Wrap { trim: true })
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(BORDER_COLOR))
+                .style(Style::default().bg(BACKGROUND_COLOR))
+                .title("Output")
+        );
+    
+    f.render_widget(output_paragraph, area);
+}
+
+fn render_input_area(f: &mut Frame, area: Rect, app: &mut App) {
+    let input_text = format!("> {}", app.input_buffer);
+    
+    let input_paragraph = Paragraph::new(input_text)
+        .style(Style::default().fg(TEXT_COLOR))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(SELECTED_COLOR))  // Highlight input area
+                .style(Style::default().bg(MENU_COLOR))
+                .title("Command Input")
+        );
+    
+    f.render_widget(input_paragraph, area);
+}
+
 fn get_title_for_mode(mode: &AppMode) -> Text {
     let title = match mode {
         AppMode::MainMenu => "🎲 D&D Tools - Main Menu 🎲",
@@ -483,7 +824,9 @@ fn get_title_for_mode(mode: &AppMode) -> Text {
         AppMode::NpcGenerator => "🎭 NPC Generator 🎭",
         AppMode::Dice => "🎲 Dice Roller 🎲",
         AppMode::CombatTracker => "⚔️  Combat Tracker ⚔️",
+        AppMode::CombatTrackerTUI => "⚔️  Combat Tracker (Interactive) ⚔️",
         AppMode::Search => "🔍 D&D 5e Search 🔍",
+        AppMode::SearchTUI => "🔍 D&D 5e Search (Interactive) 🔍",
         AppMode::Exit => "👋 Goodbye! 👋",
     };
     Text::from(title)
@@ -493,6 +836,10 @@ fn get_help_text(mode: &AppMode) -> Text {
     let help = match mode {
         AppMode::MainMenu | AppMode::CharactersMenu | AppMode::ToolsMenu => 
             "↑↓ Navigate • Enter Select • Esc Back • Q Quit",
+        AppMode::CombatTrackerTUI => 
+            "Type commands • Enter Execute • ↑↓ History • PgUp/PgDn Scroll • Esc Back",
+        AppMode::SearchTUI => 
+            "Type commands • Enter Execute • ↑↓ History • PgUp/PgDn Scroll • Esc Back",
         _ => "Press any key to continue...",
     };
     Text::from(help)
