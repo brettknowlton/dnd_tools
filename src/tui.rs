@@ -262,17 +262,19 @@ impl App {
         match cmd.as_str() {
             "help" | "h" => {
                 self.add_output("Combat Mode Commands:".to_string());
+                self.add_output("  init - Initialize combat tracker".to_string());
                 self.add_output("  stats [name] - Show character stats".to_string());
-                self.add_output("  attack <target> - Roll d20 attack vs target's AC".to_string());
-                self.add_output("  status [add|remove|list] [self|name] <status> - Manage status effects".to_string());
-                self.add_output("  search <query> - Search D&D 5e API".to_string());
-                self.add_output("  save [ability] [self|name] - Make saving throw".to_string());
+                self.add_output("  damage <name> <amount> - Apply damage".to_string());
+                self.add_output("  heal <name> <amount> - Heal character".to_string());
                 self.add_output("  next|continue - Advance to next combatant".to_string());
-                self.add_output("  back - Go back to previous combatant's turn".to_string());
-                self.add_output("  insert <name> - Add new combatant mid-fight".to_string());
-                self.add_output("  remove <name> - Remove combatant from combat".to_string());
+                self.add_output("  search <query> - Search D&D 5e API".to_string());
                 self.add_output("  show|list - Display current initiative order".to_string());
                 self.add_output("  quit|exit - Exit combat mode".to_string());
+                self.add_output("".to_string());
+                self.add_output("Examples:".to_string());
+                self.add_output("  search fireball".to_string());
+                self.add_output("  damage goblin 5".to_string());
+                self.add_output("  heal fighter 8".to_string());
             }
             "init" | "initialize" => {
                 self.initialize_combat();
@@ -315,6 +317,142 @@ impl App {
                     }
                 } else {
                     self.add_output("No combat initialized. Use 'init' to start combat.".to_string());
+                }
+            }
+            "next" | "continue" => {
+                if let Some(ref mut tracker) = self.combat_tracker {
+                    if tracker.combatants.is_empty() {
+                        self.add_output("❌ No combatants in combat.".to_string());
+                    } else {
+                        let _old_turn = tracker.current_turn;
+                        tracker.current_turn = (tracker.current_turn + 1) % tracker.combatants.len();
+                        
+                        let mut messages = Vec::new();
+                        if tracker.current_turn == 0 {
+                            tracker.round_number += 1;
+                            messages.push(format!("🔄 Starting Round {}", tracker.round_number));
+                        }
+                        
+                        let current = &tracker.combatants[tracker.current_turn];
+                        messages.push(format!("🎯 It's {}'s turn! (Initiative: {}, HP: {}/{})", 
+                            current.name, current.initiative, current.current_hp, current.max_hp));
+                        
+                        for message in messages {
+                            self.add_output(message);
+                        }
+                    }
+                } else {
+                    self.add_output("No combat initialized. Use 'init' to start combat.".to_string());
+                }
+            }
+            "stats" => {
+                if let Some(ref tracker) = self.combat_tracker {
+                    if parts.len() >= 2 {
+                        let name = parts[1];
+                        if let Some(combatant) = tracker.combatants.iter().find(|c| c.name.eq_ignore_ascii_case(name)) {
+                            let mut messages = vec![
+                                format!("📊 Stats for {}", combatant.name),
+                                format!("  HP: {}/{} ({})", combatant.current_hp, combatant.max_hp, 
+                                    if combatant.current_hp > 0 { "Alive" } else { "Unconscious/Dead" }),
+                                format!("  AC: {}", combatant.ac),
+                                format!("  Initiative: {}", combatant.initiative),
+                                format!("  Type: {}", if combatant.is_player { "Player" } else { "NPC" }),
+                            ];
+                            
+                            if !combatant.status_effects.is_empty() {
+                                messages.push("  Status Effects:".to_string());
+                                for effect in &combatant.status_effects {
+                                    let duration_text = match effect.duration {
+                                        Some(d) => format!(" ({} rounds)", d),
+                                        None => " (permanent)".to_string(),
+                                    };
+                                    messages.push(format!("    - {}{}", effect.name, duration_text));
+                                }
+                            }
+                            
+                            for message in messages {
+                                self.add_output(message);
+                            }
+                        } else {
+                            self.add_output(format!("❌ Combatant '{}' not found", name));
+                        }
+                    } else {
+                        // Show current combatant stats
+                        if let Some(current) = tracker.combatants.get(tracker.current_turn) {
+                            let messages = vec![
+                                format!("📊 Current Turn: {}", current.name),
+                                format!("  HP: {}/{}", current.current_hp, current.max_hp),
+                                format!("  AC: {}", current.ac),
+                            ];
+                            
+                            for message in messages {
+                                self.add_output(message);
+                            }
+                        } else {
+                            self.add_output("❌ No current combatant".to_string());
+                        }
+                    }
+                } else {
+                    self.add_output("No combat initialized. Use 'init' to start combat.".to_string());
+                }
+            }
+            "damage" => {
+                if parts.len() >= 3 {
+                    let target_name = parts[1];
+                    if let Ok(damage_amount) = parts[2].parse::<i32>() {
+                        if let Some(ref mut tracker) = self.combat_tracker {
+                            if let Some(combatant) = tracker.combatants.iter_mut().find(|c| c.name.eq_ignore_ascii_case(target_name)) {
+                                let old_hp = combatant.current_hp;
+                                combatant.current_hp = (combatant.current_hp - damage_amount).max(0);
+                                
+                                let mut messages = vec![
+                                    format!("⚔️ {} takes {} damage! HP: {} → {}", 
+                                        combatant.name, damage_amount, old_hp, combatant.current_hp)
+                                ];
+                                    
+                                if combatant.current_hp <= 0 {
+                                    messages.push(format!("💀 {} is unconscious/dead!", combatant.name));
+                                }
+                                
+                                for message in messages {
+                                    self.add_output(message);
+                                }
+                            } else {
+                                self.add_output(format!("❌ Combatant '{}' not found", target_name));
+                            }
+                        } else {
+                            self.add_output("No combat initialized.".to_string());
+                        }
+                    } else {
+                        self.add_output("❌ Invalid damage amount".to_string());
+                    }
+                } else {
+                    self.add_output("Usage: damage <target> <amount>".to_string());
+                }
+            }
+            "heal" => {
+                if parts.len() >= 3 {
+                    let target_name = parts[1];
+                    if let Ok(heal_amount) = parts[2].parse::<i32>() {
+                        if let Some(ref mut tracker) = self.combat_tracker {
+                            if let Some(combatant) = tracker.combatants.iter_mut().find(|c| c.name.eq_ignore_ascii_case(target_name)) {
+                                let old_hp = combatant.current_hp;
+                                combatant.current_hp = (combatant.current_hp + heal_amount).min(combatant.max_hp);
+                                
+                                let message = format!("💚 {} heals {} HP! HP: {} → {}", 
+                                    combatant.name, heal_amount, old_hp, combatant.current_hp);
+                                self.add_output(message);
+                            } else {
+                                self.add_output(format!("❌ Combatant '{}' not found", target_name));
+                            }
+                        } else {
+                            self.add_output("No combat initialized.".to_string());
+                        }
+                    } else {
+                        self.add_output("❌ Invalid heal amount".to_string());
+                    }
+                } else {
+                    self.add_output("Usage: heal <target> <amount>".to_string());
                 }
             }
             _ => {
@@ -391,31 +529,176 @@ impl App {
         self.add_output("⚔️ Enhanced Combat Tracker ⚔️".to_string());
         self.add_output("Initializing combat setup...".to_string());
         
-        // For now, create an empty combat tracker
-        // In a full implementation, we'd need to set up combatants
-        self.combat_tracker = Some(crate::combat::CombatTracker {
-            combatants: Vec::new(),
-            current_turn: 0,
-            round_number: 1,
-        });
+        // Create a combat tracker with some example combatants for testing
+        let mut tracker = crate::combat::CombatTracker::new();
         
-        self.add_output("Combat initialized! Add combatants or type 'help' for commands.".to_string());
+        // Add a sample fighter
+        let fighter = crate::combat::Combatant::new_npc(
+            "Fighter".to_string(),
+            30, // HP
+            16, // AC
+            15, // Initiative
+        );
+        tracker.combatants.push(fighter);
+        
+        // Add a sample goblin
+        let goblin = crate::combat::Combatant::new_npc(
+            "Goblin".to_string(),
+            7,  // HP
+            13, // AC
+            12, // Initiative
+        );
+        tracker.combatants.push(goblin);
+        
+        // Sort by initiative (highest first)
+        tracker.combatants.sort_by(|a, b| b.initiative.cmp(&a.initiative));
+        
+        self.combat_tracker = Some(tracker);
+        
+        self.add_output("Combat initialized with sample characters!".to_string());
+        self.add_output("".to_string());
+        self.add_output("Combatants added:".to_string());
+        self.add_output("  • Fighter (HP: 30, AC: 16, Init: 15)".to_string());
+        self.add_output("  • Goblin (HP: 7, AC: 13, Init: 12)".to_string());
+        self.add_output("".to_string());
+        self.add_output("Type 'show' to see initiative order, or 'next' to start combat!".to_string());
     }
 
     fn handle_combat_search(&mut self, query: &str) {
         self.add_output(format!("🔍 Searching for '{}'...", query));
-        // For now, just show a placeholder
-        // In a full implementation, this would use the search functionality
-        self.add_output("Search functionality will be implemented here.".to_string());
-        self.add_output("This would integrate with the D&D 5e API.".to_string());
+        
+        // Create a blocking task to handle the async search
+        let query_clone = query.to_string();
+        
+        // Create runtime for async operations
+        match tokio::runtime::Runtime::new() {
+            Ok(rt) => {
+                let client = crate::search::DndSearchClient::new();
+                
+                rt.block_on(async {
+                    match client.search(&query_clone, None).await {
+                        Ok(results) => {
+                            if results.is_empty() {
+                                self.add_output(format!("❌ No exact match found for '{}'", query_clone));
+                                
+                                let suggestions = client.get_suggestions(&query_clone, None).await;
+                                if !suggestions.is_empty() {
+                                    self.add_output("🔍 Similar items found:".to_string());
+                                    for (i, suggestion) in suggestions.iter().take(3).enumerate() {
+                                        self.add_output(format!("  {}. {}", i + 1, suggestion));
+                                    }
+                                }
+                            } else {
+                                self.add_output(format!("✅ Found {} result(s):", results.len()));
+                                
+                                for (i, result) in results.iter().take(2).enumerate() { // Show max 2 results in combat
+                                    if results.len() > 1 {
+                                        self.add_output(format!("--- Result {} ---", i + 1));
+                                    }
+                                    
+                                    self.add_output(format!("📝 {}: {}", result.index(), result.name()));
+                                    
+                                    // Display key info only (first 10 lines)
+                                    let content_lines: Vec<&str> = result.page.content.lines().collect();
+                                    for line in content_lines.iter().take(10) {
+                                        self.add_output(line.to_string());
+                                    }
+                                    
+                                    if content_lines.len() > 10 {
+                                        self.add_output(format!("... (use search mode for full details)"));
+                                    }
+                                    
+                                    if i == 0 && results.len() > 1 {
+                                        self.add_output("".to_string());
+                                    }
+                                }
+                            }
+                        },
+                        Err(e) => {
+                            self.add_output(format!("❌ Search failed: {}", e));
+                        }
+                    }
+                });
+            }
+            Err(e) => {
+                self.add_output(format!("❌ Failed to create async runtime: {}", e));
+                self.add_output("Search functionality unavailable.".to_string());
+            }
+        }
+        
+        self.add_output("".to_string());
+        self.add_output("📋 Returning to combat...".to_string());
     }
 
     fn handle_search_query(&mut self, query: &str) {
         self.add_output(format!("🔍 Searching for '{}'...", query));
-        // For now, just show a placeholder
-        // In a full implementation, this would use the search functionality
-        self.add_output("Search functionality will be implemented here.".to_string());
-        self.add_output("This would integrate with the D&D 5e API and show results.".to_string());
+        
+        // Create a blocking task to handle the async search
+        let query_clone = query.to_string();
+        
+        // Create runtime for async operations
+        match tokio::runtime::Runtime::new() {
+            Ok(rt) => {
+                let client = crate::search::DndSearchClient::new();
+                
+                rt.block_on(async {
+                    match client.search(&query_clone, None).await {
+                        Ok(results) => {
+                            if results.is_empty() {
+                                self.add_output(format!("❌ No exact match found for '{}'", query_clone));
+                                
+                                let suggestions = client.get_suggestions(&query_clone, None).await;
+                                if !suggestions.is_empty() {
+                                    self.add_output("🔍 Similar items found:".to_string());
+                                    for (i, suggestion) in suggestions.iter().take(5).enumerate() {
+                                        self.add_output(format!("  {}. {}", i + 1, suggestion));
+                                    }
+                                    self.add_output("".to_string());
+                                    self.add_output("💡 Try searching for one of these suggestions".to_string());
+                                }
+                            } else {
+                                self.add_output(format!("✅ Found {} result(s):", results.len()));
+                                self.add_output("".to_string());
+                                
+                                for (i, result) in results.iter().enumerate() {
+                                    if results.len() > 1 {
+                                        self.add_output(format!("--- Result {} ---", i + 1));
+                                    }
+                                    
+                                    // Display result information
+                                    self.add_output(format!("📝 Name: {}", result.name()));
+                                    self.add_output(format!("🏷️ Type: {}", result.index()));
+                                    self.add_output(format!("🔗 Source: {}", result.page.url));
+                                    self.add_output("".to_string());
+                                    
+                                    // Display content with line breaks
+                                    let content_lines: Vec<&str> = result.page.content.lines().collect();
+                                    for line in content_lines.iter().take(20) { // Show first 20 lines
+                                        self.add_output(line.to_string());
+                                    }
+                                    
+                                    if content_lines.len() > 20 {
+                                        self.add_output(format!("... ({} more lines)", content_lines.len() - 20));
+                                    }
+                                    
+                                    if i < results.len() - 1 {
+                                        self.add_output("".to_string());
+                                    }
+                                }
+                            }
+                        },
+                        Err(e) => {
+                            self.add_output(format!("❌ Search failed: {}", e));
+                            self.add_output("💡 This might be due to network issues".to_string());
+                        }
+                    }
+                });
+            }
+            Err(e) => {
+                self.add_output(format!("❌ Failed to create async runtime: {}", e));
+                self.add_output("Search functionality unavailable.".to_string());
+            }
+        }
     }
 }
 
