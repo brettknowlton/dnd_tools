@@ -13,6 +13,7 @@ mod combat;
 mod tests;
 mod races_classes;
 mod search;
+mod tui;
 
 fn clear_console() {
     print!("\x1B[2J\x1B[1;1H");
@@ -40,14 +41,34 @@ use combat::{enhanced_initiative_setup, CombatTracker, StatusEffect, Combatant};
 
 fn main() -> io::Result<()> {
     println!("Welcome to DnD tools!");
-    let mut characters = load_character_files();
-    println!("Loaded {} character sheets:", characters.len());
-    for character_sheet in &characters {
-        println!("{:?}\n", character_sheet);
-    }
+    let characters = load_character_files();
+    println!("Loaded {} character sheets.", characters.len());
 
     let _events = Data::new();
 
+    // Initialize TUI
+    let app = tui::App::new(characters);
+    
+    match tui::run_tui(app) {
+        Ok(final_app) => {
+            // Save any character changes before exiting
+            save_characters(final_app.characters);
+            println!("Goodbye! 👋");
+        }
+        Err(e) => {
+            eprintln!("Error running TUI: {}", e);
+            // Fall back to CLI mode if TUI fails
+            println!("Falling back to CLI mode...");
+            run_cli_mode(load_character_files())?;
+        }
+    }
+    
+    Ok(())
+}
+
+fn run_cli_mode(mut characters: Vec<Character>) -> io::Result<()> {
+    println!("Running in CLI mode...");
+    
     let mut ending = false;
     while !ending {
         println!("\n=== DnD Tools Main Menu ===");
@@ -167,7 +188,7 @@ fn exit_menu() -> bool {
 }
 
 
-fn npc_randomizer_mode() {
+pub fn npc_randomizer_mode() {
     println!("\n=== NPC Generator ===");
     
     // Ask for manual or generated stats
@@ -500,7 +521,7 @@ fn roll_3d6() -> u8 {
     (roll1 + roll2 + roll3).clamp(1, 20)
 }
 
-fn combat_tracker_mode() {
+pub fn combat_tracker_mode() {
     println!("\n⚔️  Enhanced Combat Tracker ⚔️");
     println!("Starting with Initiative setup...\n");
     
@@ -549,6 +570,7 @@ fn enhanced_combat_mode(mut combat_tracker: CombatTracker) {
     println!("  ⚔️  attack <target> - Roll attack vs target's AC");
     println!("  🎭 status [add|remove|list] [self|name] <status> - Manage status effects");
     println!("  🎲 save [ability] [self|name] - Make saving throw (e.g., save wis Gandalf)");
+    println!("  🔍 search <query> - Search D&D 5e API (returns to combat after)");
     println!("  ➡️  next|continue - Advance to next combatant");
     println!("  ⬅️  back - Go back to previous combatant's turn");
     println!("  ➕ insert <name> - Add new combatant mid-fight");
@@ -587,6 +609,15 @@ fn enhanced_combat_mode(mut combat_tracker: CombatTracker) {
                     }
                 } else {
                     println!("Usage: stats <name>");
+                }
+            }
+            "search" => {
+                if let Some(_query) = parts.get(1) {
+                    let full_query = parts[1..].join(" ");
+                    handle_search_in_combat(&full_query);
+                } else {
+                    println!("Usage: search <query>");
+                    println!("Example: search fireball");
                 }
             }
             "attack" => {
@@ -697,6 +728,7 @@ fn enhanced_combat_mode(mut combat_tracker: CombatTracker) {
                 println!("  stats [name] - Show character stats");
                 println!("  attack <target> - Roll d20 attack vs target's AC");
                 println!("  status [add|remove|list] [self|name] <status> - Manage status effects");
+                println!("  search <query> - Search D&D 5e API (returns to combat after)");
                 println!("  save [ability] [self|name] - Make saving throw (e.g., save wis Gandalf)");
                 println!("  save <npc_name> - Save NPC stats to npcs/ directory");
                 println!("  next|continue - Advance to next combatant");
@@ -954,7 +986,7 @@ fn handle_insert_combatant(combat_tracker: &mut CombatTracker, name: &str) {
     combat_tracker.display_initiative_order();
 }
 
-fn search_mode() {
+pub fn search_mode() {
     println!("\n🔍 D&D 5e Wikidot Search Tool 🔍");
     println!("═══════════════════════════════════════════════════════════");
     println!("Search for spells, classes, equipment, monsters, and races");
@@ -1254,4 +1286,48 @@ async fn test_api_connectivity(client: &DndSearchClient) {
             }
         }
     }
+}
+
+fn handle_search_in_combat(query: &str) {
+    println!("\n🔍 Searching for '{}' in D&D 5e database...", query);
+    
+    // Create runtime for async operations
+    let rt = match tokio::runtime::Runtime::new() {
+        Ok(runtime) => runtime,
+        Err(e) => {
+            println!("❌ Failed to create async runtime: {}", e);
+            println!("Search functionality unavailable.");
+            return;
+        }
+    };
+    
+    let client = DndSearchClient::new();
+    
+    rt.block_on(async {
+        match client.search(query, None).await {
+            Ok(results) => {
+                if results.is_empty() {
+                    println!("❌ No exact match found for '{}'", query);
+                    
+                    let suggestions = client.get_suggestions(query, None).await;
+                    if !suggestions.is_empty() {
+                        println!("🔍 Similar items found:");
+                        for (i, suggestion) in suggestions.iter().take(3).enumerate() {
+                            println!("  {}. {}", i + 1, suggestion);
+                        }
+                    }
+                } else {
+                    display_search_results(&results);
+                }
+            },
+            Err(e) => {
+                println!("❌ Search failed: {}", e);
+            }
+        }
+    });
+    
+    println!("\n📋 Returning to combat...");
+    println!("Press Enter to continue combat...");
+    let mut _buffer = String::new();
+    let _ = io::stdin().read_line(&mut _buffer);
 }
