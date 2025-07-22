@@ -325,7 +325,7 @@ impl App {
         
         match cmd.as_str() {
             "help" | "h" => {
-                self.add_output("Combat Mode Commands:".to_string());
+                self.add_output("⚔️ Enhanced Combat Mode Commands:".to_string());
                 self.add_output("  init - Initialize combat tracker".to_string());
                 self.add_output("  stats [name] - Show character stats".to_string());
                 self.add_output("  attack <target> - Roll attack against target's AC".to_string());
@@ -1073,10 +1073,21 @@ impl App {
 
         match cmd {
             "help" | "h" => {
-                self.add_output("🎲 Dice Roller Commands:".to_string());
-                self.add_output("  roll <dice> - Roll dice (e.g., 1d20, 2d6+3, 4d8)".to_string());
+                self.add_output("🎲 Enhanced Dice Roller Commands:".to_string());
+                self.add_output("".to_string());
+                self.add_output("📊 BASIC ROLLS:".to_string());
+                self.add_output("  roll <dice> - Roll dice with ASCII art and colors".to_string());
+                self.add_output("    Examples: roll 1d20, roll 2d6+3, roll 4d8-1".to_string());
                 self.add_output("  advantage - Roll with advantage (2d20, keep higher)".to_string());
                 self.add_output("  disadvantage - Roll with disadvantage (2d20, keep lower)".to_string());
+                self.add_output("".to_string());
+                self.add_output("🎨 FEATURES:".to_string());
+                self.add_output("  • ASCII art for dice (d4-triangle, d6-square, d8-hexagon, etc.)".to_string());
+                self.add_output("  • Color coding: Red(low) → Yellow(mid) → Green(high)".to_string());
+                self.add_output("  • Special colors: Black(1), Gold(natural 20)".to_string());
+                self.add_output("  • Proper modifier handling: dice first, then add/subtract".to_string());
+                self.add_output("".to_string());
+                self.add_output("📋 OTHER COMMANDS:".to_string());
                 self.add_output("  stats - Roll 4d6 drop lowest for ability scores".to_string());
                 self.add_output("  back - Return to tools menu".to_string());
             }
@@ -1220,7 +1231,56 @@ impl App {
                 self.add_output("│         🎲 DICE ROLL! 🎲         │".to_string());
                 self.add_output("├─────────────────────────────────┤".to_string());
                 self.add_output(format!("│ Expression: {:<19} │", dice_expr));
-                self.add_output(format!("│ Individual Rolls: {:<13} │", format!("{:?}", rolls)));
+                
+                // Extract dice type for ASCII art
+                let dice_type = if let Some(d_pos) = dice_expr.find('d') {
+                    let after_d = &dice_expr[d_pos + 1..];
+                    let sides_str = after_d.chars()
+                        .take_while(|c| c.is_ascii_digit())
+                        .collect::<String>();
+                    sides_str.parse::<u8>().unwrap_or(6)
+                } else {
+                    6
+                };
+                
+                // Display ASCII art for each die (limit to 3 dice for space)
+                if rolls.len() <= 3 {
+                    self.add_output("├─────────────────────────────────┤".to_string());
+                    
+                    for (i, &roll) in rolls.iter().enumerate() {
+                        let ascii_art = crate::dice::get_dice_ascii_art(dice_type, roll);
+                        let color = crate::dice::get_dice_color_code(roll, dice_type);
+                        let reset = crate::dice::reset_color();
+                        
+                        self.add_output(format!("│ Die #{} (d{}):{}{}{}│", 
+                            i + 1, dice_type, 
+                            " ".repeat(19 - format!("Die #{} (d{}):", i + 1, dice_type).len()),
+                            color, reset
+                        ));
+                        
+                        for line in ascii_art {
+                            let padded_line = format!("{}{}{}", color, line, reset);
+                            let clean_line_len = line.len();
+                            let padding = if clean_line_len < 31 { 31 - clean_line_len } else { 0 };
+                            self.add_output(format!("│{}{}{} │", 
+                                padded_line, 
+                                " ".repeat(padding),
+                                color
+                            ));
+                        }
+                    }
+                } else {
+                    // For many dice, just show the values with colors
+                    let mut colored_rolls = Vec::new();
+                    for &roll in &rolls {
+                        let color = crate::dice::get_dice_color_code(roll, dice_type);
+                        let reset = crate::dice::reset_color();
+                        colored_rolls.push(format!("{}{}{}", color, roll, reset));
+                    }
+                    self.add_output(format!("│ Rolls: {:<22} │", colored_rolls.join(", ")));
+                }
+                
+                self.add_output("├─────────────────────────────────┤".to_string());
                 self.add_output(format!("│ TOTAL: {:<23} │", total));
                 
                 if let Some(message) = crit_message {
@@ -1326,21 +1386,28 @@ impl App {
                                 self.add_output(format!("✅ Found {} result(s):", results.len()));
                                 
                                 for (i, result) in results.iter().take(2).enumerate() { // Show max 2 results in combat
-                                    if results.len() > 1 {
-                                        self.add_output(format!("--- Result {} ---", i + 1));
-                                    }
+                                    self.add_output("┌─ Quick Reference ─────────────────┐".to_string());
+                                    self.add_output(format!("│ 📝 {} - {}", result.name(), result.page.content_type.to_uppercase()));
+                                    self.add_output("├───────────────────────────────────┤".to_string());
                                     
-                                    self.add_output(format!("📝 {}: {}", result.index(), result.name()));
-                                    
-                                    // Display key info only (first 10 lines)
+                                    // Display key info only (first 8 lines)
                                     let content_lines: Vec<&str> = result.page.content.lines().collect();
-                                    for line in content_lines.iter().take(10) {
-                                        self.add_output(line.to_string());
+                                    for line in content_lines.iter().take(8) {
+                                        let trimmed = line.trim();
+                                        if !trimmed.is_empty() {
+                                            if trimmed.contains(':') && trimmed.len() < 60 {
+                                                self.add_output(format!("│ 📊 {}", trimmed));
+                                            } else {
+                                                self.add_output(format!("│   {}", trimmed));
+                                            }
+                                        }
                                     }
                                     
-                                    if content_lines.len() > 10 {
-                                        self.add_output(format!("... (use search mode for full details)"));
+                                    if content_lines.len() > 8 {
+                                        self.add_output("│ ... (use search mode for full details)".to_string());
                                     }
+                                    
+                                    self.add_output("└───────────────────────────────────┘".to_string());
                                     
                                     if i == 0 && results.len() > 1 {
                                         self.add_output("".to_string());
@@ -1396,24 +1463,29 @@ impl App {
                                 
                                 for (i, result) in results.iter().enumerate() {
                                     if results.len() > 1 {
-                                        self.add_output(format!("--- Result {} ---", i + 1));
+                                        self.add_output(format!("┌─ Result {} ─────────────────────────────┐", i + 1));
+                                    } else {
+                                        self.add_output("┌─ Search Result ─────────────────────────┐".to_string());
                                     }
                                     
-                                    // Display result information
-                                    self.add_output(format!("📝 Name: {}", result.name()));
-                                    self.add_output(format!("🏷️ Type: {}", result.index()));
-                                    self.add_output(format!("🔗 Source: {}", result.page.url));
-                                    self.add_output("".to_string());
+                                    // Header with name and type in a nice format
+                                    let name = result.name();
+                                    let content_type = result.page.content_type.to_uppercase();
+                                    self.add_output(format!("│ 📝 {} - {} ", name, content_type));
+                                    self.add_output("├─────────────────────────────────────────┤".to_string());
                                     
-                                    // Display content with line breaks
-                                    let content_lines: Vec<&str> = result.page.content.lines().collect();
-                                    for line in content_lines.iter().take(20) { // Show first 20 lines
-                                        self.add_output(line.to_string());
-                                    }
+                                    // URL source  
+                                    self.add_output(format!("│ 🔗 Source: {}", result.page.url));
+                                    self.add_output("├─────────────────────────────────────────┤".to_string());
                                     
-                                    if content_lines.len() > 20 {
-                                        self.add_output(format!("... ({} more lines)", content_lines.len() - 20));
-                                    }
+                                    // Format content in readable columns
+                                    self.format_search_content_for_tui(&result.page.content);
+                                    
+                                    self.add_output("└─────────────────────────────────────────┘".to_string());
+                                    
+                                    // Attribution footer
+                                    self.add_output("📄 Source: dnd5e.wikidot.com | CC BY-SA 3.0".to_string());
+                                    self.add_output("ℹ️  Educational use - see license at link above".to_string());
                                     
                                     if i < results.len() - 1 {
                                         self.add_output("".to_string());
@@ -1433,6 +1505,80 @@ impl App {
                 self.add_output("Search functionality unavailable.".to_string());
             }
         }
+    }
+
+    fn format_search_content_for_tui(&mut self, content: &str) {
+        let lines: Vec<&str> = content.lines().collect();
+        let max_lines = 25; // Limit content to keep it readable
+        
+        for (line_num, line) in lines.iter().enumerate() {
+            if line_num >= max_lines {
+                self.add_output(format!("│ ... ({} more lines) [scroll or CLI for full]", lines.len() - max_lines));
+                break;
+            }
+            
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            
+            // Format different types of content
+            if self.is_stat_line(trimmed) {
+                // Format as stat line with icon
+                self.add_output(format!("│ 📊 {}", trimmed));
+            } else if self.is_heading_line(trimmed) {
+                // Format as heading with separator
+                self.add_output(format!("│ 🔸 {}", trimmed.to_uppercase()));
+                self.add_output(format!("│ {}", "─".repeat(trimmed.len().min(35))));
+            } else if trimmed.len() > 80 {
+                // Wrap long lines
+                let wrapped = self.wrap_content_line(trimmed, 75);
+                for wrapped_line in wrapped {
+                    self.add_output(format!("│   {}", wrapped_line));
+                }
+            } else {
+                // Regular content line
+                self.add_output(format!("│   {}", trimmed));
+            }
+        }
+    }
+    
+    fn is_stat_line(&self, line: &str) -> bool {
+        // Lines that look like "Casting Time: 1 action" or "Range: 150 feet"
+        line.contains(':') && line.len() < 60 && line.split(':').count() == 2
+    }
+    
+    fn is_heading_line(&self, line: &str) -> bool {
+        // Simple heuristics for headings - short lines that are likely titles
+        line.len() < 50 && 
+        (line.ends_with(':') || 
+         line.chars().all(|c| c.is_alphanumeric() || c.is_whitespace() || c == '\'' || c == '-') &&
+         line.split_whitespace().count() <= 5)
+    }
+    
+    fn wrap_content_line(&self, text: &str, max_width: usize) -> Vec<String> {
+        let mut lines = Vec::new();
+        let mut current_line = String::new();
+        
+        for word in text.split_whitespace() {
+            if current_line.len() + word.len() + 1 > max_width {
+                if !current_line.is_empty() {
+                    lines.push(current_line);
+                    current_line = String::new();
+                }
+            }
+            
+            if !current_line.is_empty() {
+                current_line.push(' ');
+            }
+            current_line.push_str(word);
+        }
+        
+        if !current_line.is_empty() {
+            lines.push(current_line);
+        }
+        
+        lines
     }
 }
 
