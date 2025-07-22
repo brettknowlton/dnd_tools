@@ -1,0 +1,46 @@
+Next Additions:
+
+1. Dice Roll Display in TUI
+Add ASCII art for dice rolls in the TUI.
+Shapes:
+d4: Triangle
+d6: Square
+d8: Hexagon
+d10: Pentagon
+d12: Decagon
+d20: Hexagonal design inside a hexagon
+Update relevant TUI files displaying dice results.
+2. Dice Roll Color Scaling
+Implement color scaling for dice rolls:
+Scale from red (low rolls) to green (high rolls).
+Special colors: 1 as black, 20 as gold.
+Ensure this is reflected visually in the dice display panel.
+3. Dice Functionality Correction
+Confirm and fix the logic for dice rolls using the + modifier:
+The + should be applied as a post-modifier (after all dice are rolled), not per roll.
+4. Search Output Readability
+Improve TUI search output:
+Display search results in readable, well-aligned columns with clear headers.
+5. Search Warnings Handling
+Ensure search warnings are printed to the pseudoterminal, not breaking the TUI layout.
+6. Help Menu Consistency
+Update the help menu for consistency:
+Add missing items and commands.
+Provide clear examples for each command.
+7. NPC Generation & Character Display
+When generating NPCs or displaying character sheets:
+Always include ALL character stats.
+Show a "contact card" for the character in a new panel on the right during their turn.
+Files likely affected:
+
+TUI display/rendering modules
+Dice logic/utility modules
+Search functionality modules
+Help menu/documentation files
+NPC/character sheet display modules
+Acceptance Criteria:
+
+All visual changes are clear and consistent.
+Dice logic behaves as described.
+Help and search functions are easy to understand and use.
+NPC/character panels show complete information.
