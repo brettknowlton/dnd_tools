@@ -30,6 +30,8 @@ pub enum AppMode {
     InitiativeTrackerTUI,
     NpcGenerator,
     NpcGeneratorTUI,
+    EncounterRandomizer,
+    EncounterRandomizerTUI,
     Dice,
     DiceTUI,
     CombatTracker,
@@ -85,7 +87,7 @@ impl App {
         match self.mode {
             AppMode::MainMenu => vec!["Characters", "Tools", "Exit"],
             AppMode::CharactersMenu => vec!["Creation", "Display single character", "Display all characters", "Character deletion", "Back to main menu"],
-            AppMode::ToolsMenu => vec!["Initiative tracker", "NPC randomizer", "Dice", "Combat tracker", "Search D&D 5e API", "Back to main menu"],
+            AppMode::ToolsMenu => vec!["Initiative tracker", "NPC randomizer", "Encounter randomizer", "Dice", "Combat tracker", "Search D&D 5e API", "Back to main menu"],
             _ => vec![],
         }
     }
@@ -94,7 +96,7 @@ impl App {
         match self.mode {
             AppMode::CombatTrackerTUI | AppMode::SearchTUI | AppMode::CharacterCreationTUI 
             | AppMode::CharacterDisplayTUI | AppMode::CharacterDeletionTUI | AppMode::InitiativeTrackerTUI 
-            | AppMode::NpcGeneratorTUI | AppMode::DiceTUI => {
+            | AppMode::NpcGeneratorTUI | AppMode::EncounterRandomizerTUI | AppMode::DiceTUI => {
                 self.handle_terminal_key(key);
             }
             _ => {
@@ -157,10 +159,11 @@ impl App {
                 match self.selected_index {
                     0 => self.mode = AppMode::InitiativeTrackerTUI,
                     1 => self.mode = AppMode::NpcGeneratorTUI,
-                    2 => self.mode = AppMode::DiceTUI,
-                    3 => self.mode = AppMode::CombatTrackerTUI,
-                    4 => self.mode = AppMode::SearchTUI,
-                    5 => {
+                    2 => self.mode = AppMode::EncounterRandomizerTUI,
+                    3 => self.mode = AppMode::DiceTUI,
+                    4 => self.mode = AppMode::CombatTrackerTUI,
+                    5 => self.mode = AppMode::SearchTUI,
+                    6 => {
                         self.mode = AppMode::MainMenu;
                         self.selected_index = 0;
                     }
@@ -183,8 +186,8 @@ impl App {
                 self.selected_index = 0;
                 self.clear_terminal_state();
             }
-            AppMode::InitiativeTracker | AppMode::NpcGenerator | AppMode::Dice | AppMode::CombatTracker | AppMode::Search 
-            | AppMode::InitiativeTrackerTUI | AppMode::NpcGeneratorTUI | AppMode::DiceTUI => {
+            AppMode::InitiativeTracker | AppMode::NpcGenerator | AppMode::EncounterRandomizer | AppMode::Dice | AppMode::CombatTracker | AppMode::Search 
+            | AppMode::InitiativeTrackerTUI | AppMode::NpcGeneratorTUI | AppMode::EncounterRandomizerTUI | AppMode::DiceTUI => {
                 self.mode = AppMode::ToolsMenu;
                 self.selected_index = 0;
                 self.clear_terminal_state();
@@ -276,6 +279,7 @@ impl App {
             AppMode::CharacterDeletionTUI => self.process_character_deletion_command(command),
             AppMode::InitiativeTrackerTUI => self.process_initiative_command(command),
             AppMode::NpcGeneratorTUI => self.process_npc_generator_command(command),
+            AppMode::EncounterRandomizerTUI => self.process_encounter_randomizer_command(command),
             AppMode::DiceTUI => self.process_dice_command(command),
             _ => {}
         }
@@ -1062,6 +1066,204 @@ impl App {
         }
     }
 
+    fn process_encounter_randomizer_command(&mut self, command: String) {
+        let parts: Vec<&str> = command.split_whitespace().collect();
+        let cmd_string = if parts.is_empty() { 
+            String::new() 
+        } else { 
+            parts[0].to_lowercase() 
+        };
+        let cmd = cmd_string.as_str();
+
+        match cmd {
+            "help" | "h" => {
+                self.add_output("⚔️  Encounter Randomizer Commands:".to_string());
+                self.add_output("  generate <CR> - Generate encounter for Challenge Rating (e.g., generate 5)".to_string());
+                self.add_output("  generate <CR> <count> - Generate encounter with specific creature count".to_string());
+                self.add_output("  cr <CR> - Set Challenge Rating for next generation".to_string());
+                self.add_output("  examples - Show CR examples and guidelines".to_string());
+                self.add_output("  back - Return to tools menu".to_string());
+            }
+            "generate" | "gen" => {
+                if parts.len() >= 2 {
+                    if let Ok(cr) = parts[1].parse::<f64>() {
+                        if cr >= 0.0 && cr <= 30.0 {
+                            let creature_count = if parts.len() >= 3 {
+                                parts[2].parse::<usize>().unwrap_or(1).clamp(1, 8)
+                            } else {
+                                1
+                            };
+                            self.generate_encounter_tui(cr, creature_count);
+                        } else {
+                            self.add_output("❌ CR must be between 0 and 30".to_string());
+                        }
+                    } else {
+                        self.add_output("❌ Invalid CR format. Use numbers like 0.25, 1, 5, etc.".to_string());
+                    }
+                } else {
+                    self.add_output("Usage: generate <CR> [creature_count]".to_string());
+                    self.add_output("Examples: generate 1, generate 5 3, generate 0.25 2".to_string());
+                }
+            }
+            "cr" => {
+                if parts.len() >= 2 {
+                    if let Ok(cr) = parts[1].parse::<f64>() {
+                        if cr >= 0.0 && cr <= 30.0 {
+                            self.add_output(format!("✅ Challenge Rating set to {}", self.format_cr_tui(cr)));
+                            self.add_output("Use 'generate' to create an encounter with this CR".to_string());
+                            // Store CR in app state if needed
+                        } else {
+                            self.add_output("❌ CR must be between 0 and 30".to_string());
+                        }
+                    } else {
+                        self.add_output("❌ Invalid CR format. Use numbers like 0.25, 1, 5, etc.".to_string());
+                    }
+                } else {
+                    self.add_output("Usage: cr <CR>".to_string());
+                    self.add_output("Examples: cr 1, cr 5, cr 0.25".to_string());
+                }
+            }
+            "examples" | "ex" => {
+                self.add_output("⚔️  Challenge Rating Examples:".to_string());
+                self.add_output("".to_string());
+                self.add_output("  CR 0 (1/8, 1/4) - Weak creatures (rats, commoners)".to_string());
+                self.add_output("  CR 1-2 - Low-level threats (goblins, wolves)".to_string());
+                self.add_output("  CR 3-5 - Mid-level encounters (orcs, bugbears)".to_string());
+                self.add_output("  CR 6-10 - Challenging foes (trolls, giants)".to_string());
+                self.add_output("  CR 11-15 - Dangerous enemies (dragons, demons)".to_string());
+                self.add_output("  CR 16+ - Epic threats (ancient dragons, gods)".to_string());
+                self.add_output("".to_string());
+                self.add_output("Use fractional CR: 0.125 (1/8), 0.25 (1/4), 0.5 (1/2)".to_string());
+            }
+            "back" | "exit" => {
+                self.mode = AppMode::ToolsMenu;
+                self.selected_index = 0;
+                self.clear_terminal_state();
+            }
+            _ => {
+                self.add_output(format!("Unknown command '{}'. Type 'help' for commands.", cmd));
+            }
+        }
+    }
+
+    fn generate_encounter_tui(&mut self, cr: f64, creature_count: usize) {
+        use crate::races_classes::{get_random_race, get_random_class};
+        
+        self.add_output(format!("🎲 Generating encounter for CR {} with {} creature(s)...", 
+                               self.format_cr_tui(cr), creature_count));
+        self.add_output("".to_string());
+        
+        // Calculate individual creature CR for balanced encounter
+        let individual_cr = if creature_count == 1 {
+            cr
+        } else {
+            let multiplier = match creature_count {
+                2 => 0.7,
+                3..=4 => 0.5,
+                5..=6 => 0.4,
+                _ => 0.3,
+            };
+            (cr * multiplier).max(0.125)
+        };
+        
+        if creature_count > 1 {
+            self.add_output(format!("🎯 Individual creature CR adjusted to {} for balance", 
+                                   self.format_cr_tui(individual_cr)));
+            self.add_output("".to_string());
+        }
+        
+        for i in 1..=creature_count {
+            let race = get_random_race();
+            let class = get_random_class();
+            let creature_name = format!("{} {} #{}", race, class, i);
+            
+            // Generate stats based on CR (using the same logic from main.rs)
+            let (base_hp, base_ac, prof_bonus) = match individual_cr {
+                x if x < 0.25 => (7, 11, 2),
+                x if x < 0.5 => (22, 12, 2),
+                x if x < 1.0 => (32, 13, 2),
+                x if x < 2.0 => (58, 13, 2),
+                x if x < 3.0 => (71, 13, 2),
+                x if x < 4.0 => (84, 14, 2),
+                x if x < 5.0 => (97, 14, 2),
+                x if x < 6.0 => (110, 15, 3),
+                x if x < 7.0 => (123, 15, 3),
+                x if x < 8.0 => (136, 15, 3),
+                x if x < 9.0 => (149, 16, 3),
+                x if x < 10.0 => (162, 16, 4),
+                x if x < 11.0 => (175, 17, 4),
+                x if x < 13.0 => (195, 17, 4),
+                x if x < 15.0 => (225, 18, 5),
+                x if x < 17.0 => (255, 18, 5),
+                x if x < 21.0 => (285, 19, 6),
+                _ => (400, 20, 7),
+            };
+            
+            // Add randomization
+            let hp_variance = (base_hp as f64 * 0.2) as i32;
+            let hp = (base_hp + (rand::random::<i32>() % (hp_variance * 2 + 1)) - hp_variance).max(1);
+            
+            let ac_variance = if base_ac < 15 { 1 } else { 2 };
+            let ac = base_ac + (rand::random::<i32>() % (ac_variance * 2 + 1)) - ac_variance;
+            
+            let speed = ((rand::random::<u8>() % 4) + 3) * 10;
+            
+            // Generate ability scores
+            let ability_bonus = match individual_cr {
+                x if x < 1.0 => 0,
+                x if x < 5.0 => 1,
+                x if x < 10.0 => 2,
+                x if x < 15.0 => 3,
+                x if x < 20.0 => 4,
+                _ => 5,
+            };
+            
+            let strength = (self.roll_3d6_tui() + ability_bonus as u8).min(20);
+            let dexterity = (self.roll_3d6_tui() + ability_bonus as u8).min(20);
+            let constitution = (self.roll_3d6_tui() + ability_bonus as u8).min(20);
+            let intelligence = (self.roll_3d6_tui() + ability_bonus as u8).min(20);
+            let wisdom = (self.roll_3d6_tui() + ability_bonus as u8).min(20);
+            let charisma = (self.roll_3d6_tui() + ability_bonus as u8).min(20);
+            
+            // Display creature
+            self.add_output(format!("═══ {} ═══", creature_name));
+            self.add_output(format!("CR: {} | Race: {} | Class: {}", 
+                                   self.format_cr_tui(individual_cr), race, class));
+            self.add_output(format!("HP: {} | AC: {} | Speed: {} ft | Prof: +{}", 
+                                   hp, ac, speed, prof_bonus));
+            self.add_output(format!("STR: {} | DEX: {} | CON: {} | INT: {} | WIS: {} | CHA: {}", 
+                                   strength, dexterity, constitution, intelligence, wisdom, charisma));
+            self.add_output("".to_string());
+        }
+        
+        self.add_output("📋 Encounter Summary:".to_string());
+        self.add_output(format!("Total CR: {} | Creatures: {}", self.format_cr_tui(cr), creature_count));
+        self.add_output("".to_string());
+        self.add_output("💡 Tip: Use 'generate <CR> <count>' to create more encounters!".to_string());
+    }
+    
+    fn format_cr_tui(&self, cr: f64) -> String {
+        if cr < 1.0 {
+            match cr {
+                x if (x - 0.125).abs() < 0.001 => "1/8".to_string(),
+                x if (x - 0.25).abs() < 0.001 => "1/4".to_string(),
+                x if (x - 0.5).abs() < 0.001 => "1/2".to_string(),
+                _ => format!("{:.3}", cr),
+            }
+        } else if cr.fract() == 0.0 {
+            format!("{}", cr as i32)
+        } else {
+            format!("{:.1}", cr)
+        }
+    }
+    
+    fn roll_3d6_tui(&self) -> u8 {
+        let roll1 = (rand::random::<u8>() % 6) + 1;
+        let roll2 = (rand::random::<u8>() % 6) + 1;
+        let roll3 = (rand::random::<u8>() % 6) + 1;
+        (roll1 + roll2 + roll3).clamp(1, 20)
+    }
+
     fn process_dice_command(&mut self, command: String) {
         let parts: Vec<&str> = command.split_whitespace().collect();
         let cmd_string = if parts.is_empty() { 
@@ -1509,6 +1711,15 @@ pub fn run_tui(mut app: App) -> Result<App, Box<dyn std::error::Error>> {
                     app.current_state = "NPC Generator Ready".to_string();
                 }
             }
+            AppMode::EncounterRandomizerTUI => {
+                // Initialize encounter randomizer TUI
+                if app.output_history.is_empty() {
+                    app.add_output("⚔️  Encounter Randomizer - Interactive Mode ⚔️".to_string());
+                    app.add_output("Type 'help' for commands or 'generate <CR>' to create an encounter".to_string());
+                    app.add_output("Example: 'generate 5' for CR 5 encounter".to_string());
+                    app.current_state = "Encounter Randomizer Ready".to_string();
+                }
+            }
             AppMode::DiceTUI => {
                 // Initialize dice roller TUI
                 if app.output_history.is_empty() {
@@ -1584,7 +1795,7 @@ pub fn ui(f: &mut Frame, app: &mut App) {
     match app.mode {
         AppMode::CombatTrackerTUI | AppMode::SearchTUI | AppMode::CharacterCreationTUI 
         | AppMode::CharacterDisplayTUI | AppMode::CharacterDeletionTUI | AppMode::InitiativeTrackerTUI 
-        | AppMode::NpcGeneratorTUI | AppMode::DiceTUI => {
+        | AppMode::NpcGeneratorTUI | AppMode::EncounterRandomizerTUI | AppMode::DiceTUI => {
             render_terminal_content(f, chunks[1], app);
         }
         _ => {
@@ -1777,6 +1988,19 @@ fn render_output_area(f: &mut Frame, area: Rect, app: &mut App) {
                     "".to_string(),
                 ]
             },
+            AppMode::EncounterRandomizerTUI => {
+                vec![
+                    "⚔️  Encounter Randomizer - Interactive Mode ⚔️".to_string(),
+                    "".to_string(),
+                    format!("State: {}", app.current_state),
+                    "".to_string(),
+                    "Type 'help' for available commands".to_string(),
+                    "Type 'generate <CR>' to create encounter (e.g., generate 5)".to_string(),
+                    "Type 'generate <CR> <count>' for multiple creatures".to_string(),
+                    "Type 'examples' for CR guidelines".to_string(),
+                    "".to_string(),
+                ]
+            },
             AppMode::DiceTUI => {
                 vec![
                     "🎲 Dice Roller - Interactive Mode 🎲".to_string(),
@@ -1862,6 +2086,8 @@ fn get_title_for_mode(mode: &AppMode) -> Text {
         AppMode::InitiativeTrackerTUI => "⚡ Initiative Tracker (Interactive) ⚡",
         AppMode::NpcGenerator => "🎭 NPC Generator 🎭",
         AppMode::NpcGeneratorTUI => "🎭 NPC Generator (Interactive) 🎭",
+        AppMode::EncounterRandomizer => "⚔️  Encounter Randomizer ⚔️",
+        AppMode::EncounterRandomizerTUI => "⚔️  Encounter Randomizer (Interactive) ⚔️",
         AppMode::Dice => "🎲 Dice Roller 🎲",
         AppMode::DiceTUI => "🎲 Dice Roller (Interactive) 🎲",
         AppMode::CombatTracker => "⚔️  Combat Tracker ⚔️",
@@ -1879,7 +2105,7 @@ fn get_help_text(mode: &AppMode) -> Text {
             "↑↓ Navigate • Enter Select • Esc Back • Ctrl+Q Quit",
         AppMode::CombatTrackerTUI | AppMode::SearchTUI | AppMode::CharacterCreationTUI 
         | AppMode::CharacterDisplayTUI | AppMode::CharacterDeletionTUI | AppMode::InitiativeTrackerTUI 
-        | AppMode::NpcGeneratorTUI | AppMode::DiceTUI => 
+        | AppMode::NpcGeneratorTUI | AppMode::EncounterRandomizerTUI | AppMode::DiceTUI => 
             "Type commands • Enter Execute • ↑↓ History • PgUp/PgDn Scroll • Esc Back • Ctrl+Q Quit",
         _ => "Press any key to continue...",
     };

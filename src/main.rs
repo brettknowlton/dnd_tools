@@ -131,9 +131,10 @@ fn tools_menu() {
         println!("\n=== Tools Menu ===");
         println!("1. Initiative tracker");
         println!("2. NPC randomizer");
-        println!("3. Dice");
-        println!("4. Combat tracker");
-        println!("5. Search D&D 5e API");
+        println!("3. Encounter randomizer");
+        println!("4. Dice");
+        println!("5. Combat tracker");
+        println!("6. Search D&D 5e API");
         println!("0. Back to main menu");
         
         let mut buffer = String::new();
@@ -145,9 +146,10 @@ fn tools_menu() {
         match buffer.trim() {
             "1" => initiative_tracker_mode(),
             "2" => npc_randomizer_mode(),
-            "3" => roll_dice_mode(),
-            "4" => combat_tracker_mode(),
-            "5" => search_mode(),
+            "3" => encounter_randomizer_mode(),
+            "4" => roll_dice_mode(),
+            "5" => combat_tracker_mode(),
+            "6" => search_mode(),
             "0" => break,
             _ => println!("Invalid input"),
         }
@@ -519,6 +521,290 @@ fn roll_3d6() -> u8 {
     let roll2 = (rand::random::<u8>() % 6) + 1;
     let roll3 = (rand::random::<u8>() % 6) + 1;
     (roll1 + roll2 + roll3).clamp(1, 20)
+}
+
+pub fn encounter_randomizer_mode() {
+    println!("\n⚔️  === Encounter Randomizer === ⚔️");
+    println!("Generate balanced encounters based on Challenge Rating (CR)");
+    println!("═══════════════════════════════════════════════════════════");
+    
+    // Ask for Combat Rating
+    println!("\nEnter Combat Rating (CR):");
+    println!("Examples: 0 (CR 1/4), 1 (CR 1), 5 (CR 5), 10 (CR 10)");
+    println!("Or fractional: 0.125 (CR 1/8), 0.25 (CR 1/4), 0.5 (CR 1/2)");
+    print!("CR: ");
+    io::stdout().flush().unwrap();
+    
+    let mut cr_input = String::new();
+    if io::stdin().read_line(&mut cr_input).is_err() {
+        println!("Failed to read input, defaulting to CR 1");
+        generate_encounter_by_cr(1.0);
+        return;
+    }
+    
+    let cr = match cr_input.trim().parse::<f64>() {
+        Ok(val) if val >= 0.0 && val <= 30.0 => val,
+        _ => {
+            println!("Invalid CR, defaulting to CR 1");
+            1.0
+        }
+    };
+    
+    generate_encounter_by_cr(cr);
+}
+
+fn generate_encounter_by_cr(cr: f64) {
+    use crate::races_classes::{get_random_race, get_random_class};
+    
+    println!("\n🎲 Generating encounter for CR {}...", format_cr(cr));
+    
+    // Ask for number of creatures
+    println!("\nHow many creatures in this encounter? (1-8): ");
+    let mut num_input = String::new();
+    if io::stdin().read_line(&mut num_input).is_err() {
+        println!("Failed to read input, generating 1 creature");
+    }
+    
+    let num_creatures = match num_input.trim().parse::<usize>() {
+        Ok(n) if n >= 1 && n <= 8 => n,
+        _ => {
+            println!("Invalid number, generating 1 creature");
+            1
+        }
+    };
+    
+    // Calculate individual creature CR for balanced encounter
+    let individual_cr = if num_creatures == 1 {
+        cr
+    } else {
+        // For multiple creatures, reduce individual CR
+        let multiplier = match num_creatures {
+            2 => 0.7,
+            3..=4 => 0.5,
+            5..=6 => 0.4,
+            _ => 0.3,
+        };
+        (cr * multiplier).max(0.125)
+    };
+    
+    println!("\n🎯 Creating {} creature(s) at individual CR {}", 
+             num_creatures, format_cr(individual_cr));
+    println!("═══════════════════════════════════════════════════════════");
+    
+    let mut encounter = Vec::new();
+    
+    for i in 1..=num_creatures {
+        let creature = generate_creature_by_cr(individual_cr, i);
+        encounter.push(creature.clone());
+        
+        display_creature(&creature);
+        println!();
+    }
+    
+    // Show encounter summary
+    println!("📋 === Encounter Summary ===");
+    println!("Total Challenge Rating: {}", format_cr(cr));
+    println!("Creatures: {}", num_creatures);
+    for (i, creature) in encounter.iter().enumerate() {
+        println!("  {}. {} (CR {}, HP: {}, AC: {})", 
+                 i + 1, creature.name, format_cr(creature.cr), creature.hp, creature.ac);
+    }
+    
+    // Ask if they want to save the encounter
+    println!("\nSave this encounter? (y/n): ");
+    let mut save_input = String::new();
+    if io::stdin().read_line(&mut save_input).is_ok() && save_input.trim().to_lowercase() == "y" {
+        save_encounter(&encounter, cr);
+    }
+    
+    println!("\nPress Enter to continue...");
+    let mut _buffer = String::new();
+    let _ = io::stdin().read_line(&mut _buffer);
+}
+
+#[derive(Clone)]
+struct EncounterCreature {
+    name: String,
+    race: String,
+    class: String,
+    cr: f64,
+    hp: i32,
+    ac: i32,
+    speed: i32,
+    strength: u8,
+    dexterity: u8,
+    constitution: u8,
+    intelligence: u8,
+    wisdom: u8,
+    charisma: u8,
+    proficiency_bonus: i32,
+}
+
+fn generate_creature_by_cr(cr: f64, creature_num: usize) -> EncounterCreature {
+    use crate::races_classes::{get_random_race, get_random_class};
+    
+    let race = get_random_race();
+    let class = get_random_class();
+    let name = format!("{} {} #{}", race, class, creature_num);
+    
+    // Calculate stats based on CR
+    let (base_hp, base_ac, prof_bonus) = match cr {
+        x if x < 0.25 => (7, 11, 2),   // CR 1/8, 1/4
+        x if x < 0.5 => (22, 12, 2),   // CR 1/4
+        x if x < 1.0 => (32, 13, 2),   // CR 1/2
+        x if x < 2.0 => (58, 13, 2),   // CR 1
+        x if x < 3.0 => (71, 13, 2),   // CR 2
+        x if x < 4.0 => (84, 14, 2),   // CR 3
+        x if x < 5.0 => (97, 14, 2),   // CR 4
+        x if x < 6.0 => (110, 15, 3),  // CR 5
+        x if x < 7.0 => (123, 15, 3),  // CR 6
+        x if x < 8.0 => (136, 15, 3),  // CR 7
+        x if x < 9.0 => (149, 16, 3),  // CR 8
+        x if x < 10.0 => (162, 16, 4), // CR 9
+        x if x < 11.0 => (175, 17, 4), // CR 10
+        x if x < 13.0 => (195, 17, 4), // CR 11-12
+        x if x < 15.0 => (225, 18, 5), // CR 13-14
+        x if x < 17.0 => (255, 18, 5), // CR 15-16
+        x if x < 21.0 => (285, 19, 6), // CR 17-20
+        _ => (400, 20, 7),              // CR 21+
+    };
+    
+    // Add some randomization to base stats (±20%)
+    let hp_variance = (base_hp as f64 * 0.2) as i32;
+    let hp = (base_hp + (rand::random::<i32>() % (hp_variance * 2 + 1)) - hp_variance).max(1);
+    
+    let ac_variance = if base_ac < 15 { 1 } else { 2 };
+    let ac = base_ac + (rand::random::<i32>() % (ac_variance * 2 + 1)) - ac_variance;
+    
+    let speed = (((rand::random::<u8>() % 4) + 3) * 10) as i32; // 30-60 feet
+    
+    // Generate ability scores scaled by CR
+    let ability_bonus = match cr {
+        x if x < 1.0 => 0,
+        x if x < 5.0 => 1,
+        x if x < 10.0 => 2,
+        x if x < 15.0 => 3,
+        x if x < 20.0 => 4,
+        _ => 5,
+    };
+    
+    let strength = (roll_3d6() + ability_bonus as u8).min(20);
+    let dexterity = (roll_3d6() + ability_bonus as u8).min(20);
+    let constitution = (roll_3d6() + ability_bonus as u8).min(20);
+    let intelligence = (roll_3d6() + ability_bonus as u8).min(20);
+    let wisdom = (roll_3d6() + ability_bonus as u8).min(20);
+    let charisma = (roll_3d6() + ability_bonus as u8).min(20);
+    
+    EncounterCreature {
+        name,
+        race,
+        class,
+        cr,
+        hp,
+        ac,
+        speed,
+        strength,
+        dexterity,
+        constitution,
+        intelligence,
+        wisdom,
+        charisma,
+        proficiency_bonus: prof_bonus,
+    }
+}
+
+fn display_creature(creature: &EncounterCreature) {
+    println!("╔═══════════════════════════════════════╗");
+    println!("║ {:<37} ║", creature.name);
+    println!("╠═══════════════════════════════════════╣");
+    println!("║ CR: {:<33} ║", format_cr(creature.cr));
+    println!("║ Race: {:<31} ║", creature.race);
+    println!("║ Class: {:<30} ║", creature.class);
+    println!("║ HP: {:<33} ║", creature.hp);
+    println!("║ AC: {:<33} ║", creature.ac);
+    println!("║ Speed: {} feet{:<21} ║", creature.speed, "");
+    println!("║ Proficiency: +{:<26} ║", creature.proficiency_bonus);
+    println!("║                                       ║");
+    println!("║ Ability Scores:                       ║");
+    println!("║   STR: {:<29} ║", creature.strength);
+    println!("║   DEX: {:<29} ║", creature.dexterity);
+    println!("║   CON: {:<29} ║", creature.constitution);
+    println!("║   INT: {:<29} ║", creature.intelligence);
+    println!("║   WIS: {:<29} ║", creature.wisdom);
+    println!("║   CHA: {:<29} ║", creature.charisma);
+    println!("╚═══════════════════════════════════════╝");
+}
+
+pub fn format_cr(cr: f64) -> String {
+    if cr < 1.0 {
+        match cr {
+            x if (x - 0.125).abs() < 0.001 => "1/8".to_string(),
+            x if (x - 0.25).abs() < 0.001 => "1/4".to_string(),
+            x if (x - 0.5).abs() < 0.001 => "1/2".to_string(),
+            _ => format!("{:.3}", cr),
+        }
+    } else if cr.fract() == 0.0 {
+        format!("{}", cr as i32)
+    } else {
+        format!("{:.1}", cr)
+    }
+}
+
+fn save_encounter(encounter: &[EncounterCreature], total_cr: f64) {
+    use std::fs;
+    
+    println!("Enter encounter name to save: ");
+    let mut name_input = String::new();
+    if io::stdin().read_line(&mut name_input).is_err() {
+        println!("Failed to read name, not saving");
+        return;
+    }
+    
+    let name = name_input.trim();
+    if name.is_empty() {
+        println!("No name provided, not saving");
+        return;
+    }
+    
+    // Create encounters directory if it doesn't exist
+    if let Err(e) = fs::create_dir_all("encounters") {
+        println!("Failed to create encounters directory: {}", e);
+        return;
+    }
+    
+    let path = format!("encounters/{}_CR{}.txt", name, format_cr(total_cr));
+    
+    let mut encounter_data = format!("Encounter: {}\nTotal CR: {}\nCreatures: {}\n\n", 
+                                     name, format_cr(total_cr), encounter.len());
+    
+    for (i, creature) in encounter.iter().enumerate() {
+        encounter_data.push_str(&format!(
+            "=== Creature {} ===\n\
+            Name: {}\n\
+            CR: {}\n\
+            Race: {}\n\
+            Class: {}\n\
+            HP: {}\n\
+            AC: {}\n\
+            Speed: {}\n\
+            Proficiency: +{}\n\
+            STR: {}\n\
+            DEX: {}\n\
+            CON: {}\n\
+            INT: {}\n\
+            WIS: {}\n\
+            CHA: {}\n\n",
+            i + 1, creature.name, format_cr(creature.cr), creature.race, creature.class,
+            creature.hp, creature.ac, creature.speed, creature.proficiency_bonus,
+            creature.strength, creature.dexterity, creature.constitution,
+            creature.intelligence, creature.wisdom, creature.charisma
+        ));
+    }
+    
+    match fs::write(&path, encounter_data) {
+        Ok(_) => println!("✅ Saved encounter '{}' to {}", name, path),
+        Err(e) => println!("❌ Failed to save encounter: {}", e),
+    }
 }
 
 pub fn combat_tracker_mode() {
