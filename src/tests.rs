@@ -248,6 +248,71 @@ mod tests {
     }
 
     #[test]
+    fn test_roll_dice_with_modifiers() {
+        // Test positive modifier
+        let result = crate::dice::roll_dice("1d4+5");
+        assert!(result.is_ok());
+        let (rolls, total) = result.unwrap();
+        assert_eq!(rolls.len(), 1);
+        assert!(rolls[0] >= 1 && rolls[0] <= 4);
+        assert!(total >= 6 && total <= 9); // 1-4 + 5 = 6-9
+        
+        // Test negative modifier
+        let result = crate::dice::roll_dice("1d6-2");
+        assert!(result.is_ok());
+        let (rolls, total) = result.unwrap();
+        assert_eq!(rolls.len(), 1);
+        assert!(rolls[0] >= 1 && rolls[0] <= 6);
+        // Note: negative results are clamped to 0
+        assert!(total <= 4); // max(1-2, 0) to max(6-2, 0) = 0-4
+        
+        // Test multiple dice with modifier
+        let result = crate::dice::roll_dice("2d6+3");
+        assert!(result.is_ok());
+        let (rolls, total) = result.unwrap();
+        assert_eq!(rolls.len(), 2);
+        for &roll in &rolls {
+            assert!(roll >= 1 && roll <= 6);
+        }
+        assert!(total >= 5 && total <= 15); // (1+1)+3 to (6+6)+3 = 5-15
+    }
+
+    #[test] 
+    fn test_dice_ascii_art() {
+        // Test that ASCII art is generated for different dice types
+        let d4_art = crate::dice::get_dice_ascii_art(4, 3);
+        assert!(!d4_art.is_empty());
+        assert!(d4_art.iter().any(|line| line.contains("3")));
+        
+        let d6_art = crate::dice::get_dice_ascii_art(6, 5);
+        assert!(!d6_art.is_empty());
+        assert!(d6_art.iter().any(|line| line.contains("5")));
+        
+        let d20_art = crate::dice::get_dice_ascii_art(20, 20);
+        assert!(!d20_art.is_empty());
+        assert!(d20_art.iter().any(|line| line.contains("20")));
+    }
+
+    #[test]
+    fn test_dice_color_coding() {
+        // Test color codes for different values
+        let low_color = crate::dice::get_dice_color_code(1, 20);
+        assert_eq!(low_color, "\x1b[30m"); // Black for 1
+        
+        let nat20_color = crate::dice::get_dice_color_code(20, 20);
+        assert_eq!(nat20_color, "\x1b[33m"); // Gold for nat 20
+        
+        let mid_color = crate::dice::get_dice_color_code(10, 20);
+        assert_eq!(mid_color, "\x1b[33m"); // Yellow for medium
+        
+        let high_color = crate::dice::get_dice_color_code(18, 20);
+        assert_eq!(high_color, "\x1b[32m"); // Green for high
+        
+        let reset = crate::dice::reset_color();
+        assert_eq!(reset, "\x1b[0m");
+    }
+
+    #[test]
     fn test_races_classes_lists() {
         use crate::races_classes::*;
         

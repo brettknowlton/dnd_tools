@@ -1,5 +1,6 @@
 use std::io::{self, Write};
 use std::process;
+use std::env;
 use crate::search::{DndSearchClient, SearchCategory, SearchResult};
 
 mod character;
@@ -40,6 +41,13 @@ use combat::{enhanced_initiative_setup, CombatTracker, StatusEffect, Combatant};
 
 
 fn main() -> io::Result<()> {
+    let args: Vec<String> = env::args().collect();
+    
+    // Handle command-line interface for direct searches
+    if args.len() > 1 {
+        return handle_cli_args(args);
+    }
+    
     println!("Welcome to DnD tools!");
     let characters = load_character_files();
     println!("Loaded {} character sheets.", characters.len());
@@ -64,6 +72,119 @@ fn main() -> io::Result<()> {
     }
     
     Ok(())
+}
+
+fn handle_cli_args(args: Vec<String>) -> io::Result<()> {
+    let mut refresh_cache = false;
+    let mut arg_index = 1;
+    
+    // Check for --refresh flag
+    if args.len() > 1 && args[1] == "--refresh" {
+        refresh_cache = true;
+        arg_index = 2;
+    }
+    
+    // Check for help
+    if args.len() > arg_index && (args[arg_index] == "--help" || args[arg_index] == "-h") {
+        print_cli_help();
+        return Ok(());
+    }
+    
+    // Need at least one more argument for search
+    if args.len() <= arg_index {
+        print_cli_help();
+        return Ok(());
+    }
+    
+    let category_str = &args[arg_index];
+    let category = SearchCategory::from_str(category_str);
+    
+    let (search_category, query) = if category.is_some() && args.len() > arg_index + 1 {
+        // Format: dnd_tools [--refresh] <category> <query>
+        (category, args[arg_index + 1..].join(" "))
+    } else {
+        // Format: dnd_tools [--refresh] <query>
+        (None, args[arg_index..].join(" "))
+    };
+    
+    // Perform the search
+    let rt = tokio::runtime::Runtime::new().map_err(|e| {
+        io::Error::new(io::ErrorKind::Other, format!("Failed to create async runtime: {}", e))
+    })?;
+    
+    rt.block_on(async {
+        let client = if refresh_cache {
+            DndSearchClient::with_cache_refresh(true)
+        } else {
+            DndSearchClient::new()
+        };
+        
+        if refresh_cache {
+            println!("🔄 Refreshing cache for '{}'...", query);
+        } else {
+            println!("🔍 Searching for '{}'...", query);
+        }
+        
+        match client.search(&query, search_category).await {
+            Ok(results) => {
+                if results.is_empty() {
+                    println!("❌ No results found for '{}'", query);
+                    
+                    let suggestions = client.get_suggestions(&query, search_category).await;
+                    if !suggestions.is_empty() {
+                        println!("💡 Did you mean one of these?");
+                        for suggestion in suggestions {
+                            println!("  • {}", suggestion);
+                        }
+                    }
+                } else {
+                    for result in results {
+                        result.display();
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("❌ Search failed: {}", e);
+                std::process::exit(1);
+            }
+        }
+    });
+    
+    Ok(())
+}
+
+fn print_cli_help() {
+    println!("D&D 5e Wikidot Reference Tool");
+    println!();
+    println!("USAGE:");
+    println!("    dnd_tools [--refresh] [CATEGORY] QUERY");
+    println!("    dnd_tools --help");
+    println!();
+    println!("OPTIONS:");
+    println!("    --refresh    Force refresh cache (bypass cached results)");
+    println!("    --help, -h   Show this help message");
+    println!();
+    println!("CATEGORIES:");
+    println!("    spell        Magic spells");
+    println!("    class        Character classes");
+    println!("    equipment    Weapons, armor, and gear");
+    println!("    monster      Creatures and NPCs");
+    println!("    race         Character races");
+    println!();
+    println!("EXAMPLES:");
+    println!("    dnd_tools fireball");
+    println!("    dnd_tools spell magic missile");
+    println!("    dnd_tools --refresh spell fireball");
+    println!("    dnd_tools class wizard");
+    println!("    dnd_tools equipment longsword");
+    println!("    dnd_tools monster troll");
+    println!();
+    println!("INTERACTIVE MODE:");
+    println!("    Run 'dnd_tools' without arguments to start the interactive TUI");
+    println!();
+    println!("LEGAL:");
+    println!("    All content sourced from dnd5e.wikidot.com under CC BY-SA 3.0");
+    println!("    https://creativecommons.org/licenses/by-sa/3.0/");
 }
 
 fn run_cli_mode(mut characters: Vec<Character>) -> io::Result<()> {

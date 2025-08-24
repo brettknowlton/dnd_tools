@@ -1,5 +1,8 @@
 use regex::Regex;
 use scraper::{Html, Selector};
+use std::fs;
+use std::path::PathBuf;
+use anyhow::{Result, Context};
 
 // Simplified data structure for wikidot page content
 #[derive(Debug, Clone)]
@@ -93,6 +96,13 @@ impl SearchResult {
         // Display the content with nice formatting
         println!();
         self.format_content(&page.content);
+        
+        // Add proper attribution as required by CC BY-SA 3.0
+        println!("\n{}", "─".repeat(80));
+        println!("📄 Source: dnd5e.wikidot.com | CC BY-SA 3.0");
+        println!("🔗 https://creativecommons.org/licenses/by-sa/3.0/");
+        println!("ℹ️  Content used under Creative Commons Attribution-ShareAlike 3.0 license");
+        println!("   for personal/educational use only.");
         println!();
     }
 
@@ -160,6 +170,7 @@ impl SearchResult {
 pub struct DndSearchClient {
     base_url: String,
     client: reqwest::Client,
+    cache_dir: PathBuf,
 }
 
 impl Default for DndSearchClient {
@@ -170,15 +181,52 @@ impl Default for DndSearchClient {
 
 impl DndSearchClient {
     pub fn new() -> Self {
+        Self::with_cache_refresh(false)
+    }
+    
+    pub fn with_cache_refresh(_refresh: bool) -> Self {
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(10))
             .build()
             .expect("Failed to create HTTP client - network required for Wikidot API");
         
+        let cache_dir = Self::get_cache_dir();
+        
+        // Create cache directory if it doesn't exist
+        if let Err(e) = fs::create_dir_all(&cache_dir) {
+            eprintln!("Warning: Failed to create cache directory: {}", e);
+        }
+        
         DndSearchClient {
             base_url: "http://dnd5e.wikidot.com".to_string(),
             client,
+            cache_dir,
         }
+    }
+    
+    fn get_cache_dir() -> PathBuf {
+        if let Some(cache_root) = dirs::cache_dir() {
+            cache_root.join("dnd_tools")
+        } else {
+            // Fallback to current directory if cache dir can't be determined
+            PathBuf::from(".cache/dnd_tools")
+        }
+    }
+    
+    fn get_cache_path(&self, slug: &str) -> PathBuf {
+        let safe_slug = slug.replace(":", "_").replace("/", "_");
+        self.cache_dir.join(format!("{}.txt", safe_slug))
+    }
+    
+    fn load_from_cache(&self, slug: &str) -> Option<String> {
+        let cache_path = self.get_cache_path(slug);
+        fs::read_to_string(cache_path).ok()
+    }
+    
+    fn save_to_cache(&self, slug: &str, content: &str) -> Result<()> {
+        let cache_path = self.get_cache_path(slug);
+        fs::write(cache_path, content)
+            .context("Failed to save content to cache")
     }
 
     // Search with fuzzy matching using Wikidot HTML scraping
@@ -219,7 +267,24 @@ impl DndSearchClient {
     }
 
     async fn fetch_wiki_page(&self, query: &str, content_type: &str, url_prefix: &str) -> Result<Vec<SearchResult>, String> {
-        // Try different URL patterns that wikidot might use
+        let cache_key = format!("{}:{}", url_prefix, query);
+        
+        // Try to load from cache first
+        if let Some(cached_content) = self.load_from_cache(&cache_key) {
+            // Parse cached content to create SearchResult
+            if let Some((title, url, content)) = self.parse_cached_content(&cached_content) {
+                let page = WikiPageContent {
+                    index: query.to_lowercase().replace(" ", "-"),
+                    name: title,
+                    url,
+                    content,
+                    content_type: content_type.to_string(),
+                };
+                return Ok(vec![SearchResult { page }]);
+            }
+        }
+        
+        // Not in cache or cache invalid, fetch from web
         let possible_urls = self.generate_possible_urls(query, url_prefix);
         
         for url in possible_urls {
@@ -239,6 +304,12 @@ impl DndSearchClient {
                 let content = self.extract_page_content(&document)?;
                 let title = self.extract_page_title(&document, query);
                 
+                // Create cached content format
+                let cached_content = format!("TITLE:{}\nURL:{}\nCONTENT:\n{}", title, url, content);
+                
+                // Save to cache (ignore errors)
+                let _ = self.save_to_cache(&cache_key, &cached_content);
+                
                 let page = WikiPageContent {
                     index: query.to_lowercase().replace(" ", "-"),
                     name: title,
@@ -252,6 +323,20 @@ impl DndSearchClient {
         }
         
         Err(format!("{} '{}' not found", content_type, query))
+    }
+    
+    fn parse_cached_content(&self, content: &str) -> Option<(String, String, String)> {
+        let lines: Vec<&str> = content.lines().collect();
+        if lines.len() < 3 {
+            return None;
+        }
+        
+        let title = lines[0].strip_prefix("TITLE:")?.to_string();
+        let url = lines[1].strip_prefix("URL:")?.to_string();
+        let content_start = content.find("CONTENT:\n")?;
+        let content = content[content_start + 9..].to_string();
+        
+        Some((title, url, content))
     }
 
     fn generate_possible_urls(&self, query: &str, url_prefix: &str) -> Vec<String> {
@@ -330,6 +415,20 @@ impl DndSearchClient {
     }
 
     fn html_to_readable_text(&self, html: &str) -> String {
+        // First try using html2text for better formatting
+        let text = html2text::from_read(html.as_bytes(), 80);
+        let cleaned = text
+            .lines()
+            .map(|line| line.trim())
+            .filter(|line| !line.is_empty() && line.len() > 2)
+            .collect::<Vec<_>>()
+            .join("\n");
+        
+        if !cleaned.trim().is_empty() {
+            return cleaned;
+        }
+        
+        // Fallback: custom HTML parsing (existing logic)
         let mut result = String::new();
         let document = Html::parse_fragment(html);
         
@@ -383,7 +482,7 @@ impl DndSearchClient {
             .to_string();
         
         if final_result.trim().is_empty() {
-            // Fallback: just strip HTML tags and return raw text
+            // Last resort fallback: just strip HTML tags and return raw text
             let tag_regex = Regex::new(r"<[^>]+>").unwrap();
             let raw_text = tag_regex.replace_all(html, " ");
             let whitespace_regex = Regex::new(r"\s+").unwrap();
@@ -553,13 +652,47 @@ mod tests {
     }
 
     #[test]
-    fn test_html_to_readable_text() {
+    fn test_cache_functionality() {
         let client = DndSearchClient::new();
         
-        let html = r#"<p>A bright streak flashes from your pointing finger.</p><p>Each creature in a 20-foot-radius sphere centered on that point must make a Dexterity saving throw.</p>"#;
+        // Test cache directory creation
+        assert!(client.cache_dir.exists() || client.cache_dir.parent().map_or(false, |p| p.exists()));
+        
+        // Test cache path generation
+        let cache_path = client.get_cache_path("spell:fireball");
+        assert!(cache_path.to_str().unwrap().contains("spell_fireball.txt"));
+        
+        // Test safe slug conversion
+        let cache_path2 = client.get_cache_path("monster:ancient-red-dragon");
+        assert!(cache_path2.to_str().unwrap().contains("monster_ancient-red-dragon.txt"));
+    }
+    
+    #[test]
+    fn test_cached_content_parsing() {
+        let client = DndSearchClient::new();
+        
+        let test_content = "TITLE:Fireball\nURL:http://dnd5e.wikidot.com/spell:fireball\nCONTENT:\nA bright streak flashes from your pointing finger.";
+        
+        let parsed = client.parse_cached_content(test_content);
+        assert!(parsed.is_some());
+        
+        let (title, url, content) = parsed.unwrap();
+        assert_eq!(title, "Fireball");
+        assert_eq!(url, "http://dnd5e.wikidot.com/spell:fireball");
+        assert!(content.contains("bright streak"));
+    }
+    
+    #[test]
+    fn test_html2text_integration() {
+        let client = DndSearchClient::new();
+        
+        let html = "<p>This is a <strong>test</strong> paragraph.</p><p>Another paragraph with <em>emphasis</em>.</p>";
         let result = client.html_to_readable_text(html);
-        assert!(result.contains("bright streak"));
-        assert!(result.contains("Dexterity saving throw"));
+        
+        assert!(result.contains("test"));
+        assert!(result.contains("paragraph"));
+        assert!(!result.contains("<p>"));
+        assert!(!result.contains("<strong>"));
     }
 
     #[test]

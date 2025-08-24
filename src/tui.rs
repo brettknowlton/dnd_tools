@@ -325,7 +325,7 @@ impl App {
         
         match cmd.as_str() {
             "help" | "h" => {
-                self.add_output("Combat Mode Commands:".to_string());
+                self.add_output("⚔️ Enhanced Combat Mode Commands:".to_string());
                 self.add_output("  init - Initialize combat tracker".to_string());
                 self.add_output("  stats [name] - Show character stats".to_string());
                 self.add_output("  attack <target> - Roll attack against target's AC".to_string());
@@ -390,26 +390,38 @@ impl App {
                 }
             }
             "next" | "continue" => {
-                if let Some(ref mut tracker) = self.combat_tracker {
+                if let Some(ref tracker) = self.combat_tracker {
                     if tracker.combatants.is_empty() {
                         self.add_output("❌ No combatants in combat.".to_string());
                     } else {
                         let _old_turn = tracker.current_turn;
-                        tracker.current_turn = (tracker.current_turn + 1) % tracker.combatants.len();
+                        let new_turn = (tracker.current_turn + 1) % tracker.combatants.len();
                         
                         let mut messages = Vec::new();
-                        if tracker.current_turn == 0 {
-                            tracker.round_number += 1;
-                            messages.push(format!("🔄 Starting Round {}", tracker.round_number));
+                        if new_turn == 0 {
+                            let new_round = tracker.round_number + 1;
+                            messages.push(format!("🔄 Starting Round {}", new_round));
                         }
                         
-                        let current = &tracker.combatants[tracker.current_turn];
+                        let current_combatant = tracker.combatants[new_turn].clone();
                         messages.push(format!("🎯 It's {}'s turn! (Initiative: {}, HP: {}/{})", 
-                            current.name, current.initiative, current.current_hp, current.max_hp));
+                            current_combatant.name, current_combatant.initiative, 
+                            current_combatant.current_hp, current_combatant.max_hp));
+                        
+                        // Now update the tracker
+                        if let Some(ref mut tracker) = self.combat_tracker {
+                            tracker.current_turn = new_turn;
+                            if new_turn == 0 {
+                                tracker.round_number += 1;
+                            }
+                        }
                         
                         for message in messages {
                             self.add_output(message);
                         }
+                        
+                        // Display combat contact card for current character
+                        self.display_combat_contact_card(&current_combatant);
                     }
                 } else {
                     self.add_output("No combat initialized. Use 'init' to start combat.".to_string());
@@ -1073,10 +1085,21 @@ impl App {
 
         match cmd {
             "help" | "h" => {
-                self.add_output("🎲 Dice Roller Commands:".to_string());
-                self.add_output("  roll <dice> - Roll dice (e.g., 1d20, 2d6+3, 4d8)".to_string());
+                self.add_output("🎲 Enhanced Dice Roller Commands:".to_string());
+                self.add_output("".to_string());
+                self.add_output("📊 BASIC ROLLS:".to_string());
+                self.add_output("  roll <dice> - Roll dice with ASCII art and colors".to_string());
+                self.add_output("    Examples: roll 1d20, roll 2d6+3, roll 4d8-1".to_string());
                 self.add_output("  advantage - Roll with advantage (2d20, keep higher)".to_string());
                 self.add_output("  disadvantage - Roll with disadvantage (2d20, keep lower)".to_string());
+                self.add_output("".to_string());
+                self.add_output("🎨 FEATURES:".to_string());
+                self.add_output("  • ASCII art for dice (d4-triangle, d6-square, d8-hexagon, etc.)".to_string());
+                self.add_output("  • Color coding: Red(low) → Yellow(mid) → Green(high)".to_string());
+                self.add_output("  • Special colors: Black(1), Gold(natural 20)".to_string());
+                self.add_output("  • Proper modifier handling: dice first, then add/subtract".to_string());
+                self.add_output("".to_string());
+                self.add_output("📋 OTHER COMMANDS:".to_string());
                 self.add_output("  stats - Roll 4d6 drop lowest for ability scores".to_string());
                 self.add_output("  back - Return to tools menu".to_string());
             }
@@ -1120,96 +1143,302 @@ impl App {
 
     // Helper functions for the new TUI modes
     fn display_character_details(&mut self, character: &Character) {
-        self.add_output(format!("📋 Character Details: {}", character.name));
         self.add_output("".to_string());
+        self.add_output("╔═══════════════════════════════════════════════════════════════════════════════╗".to_string());
+        self.add_output(format!("║ 📋 {} - COMPLETE CHARACTER SHEET{} ║", 
+            character.name, 
+            " ".repeat(47_i32.saturating_sub(character.name.len() as i32) as usize)
+        ));
+        self.add_output("╠═══════════════════════════════════════════════════════════════════════════════╣".to_string());
         
-        if let Some(level) = character.level {
-            self.add_output(format!("Level: {}", level));
+        // Basic Info Section
+        self.add_output("║ 🎭 BASIC INFORMATION                                                         ║".to_string());
+        self.add_output("╠───────────────────────────────────────────────────────────────────────────────╣".to_string());
+        self.add_output(format!("║ Level: {:<15} Class: {:<15} Race: {:<15} ║", 
+            character.level.map(|l| l.to_string()).unwrap_or("N/A".to_string()),
+            character.class.as_ref().unwrap_or(&"Unknown".to_string()),
+            character.race.as_ref().unwrap_or(&"Unknown".to_string())
+        ));
+        
+        // Ability Scores Section
+        self.add_output("╠───────────────────────────────────────────────────────────────────────────────╣".to_string());
+        self.add_output("║ 💪 ABILITY SCORES                                                            ║".to_string());
+        self.add_output("╠───────────────────────────────────────────────────────────────────────────────╣".to_string());
+        
+        let str_display = character.stre.map(|v| format!("{} ({})", v, character.get_strength_modifier())).unwrap_or("N/A".to_string());
+        let dex_display = character.dext.map(|v| format!("{} ({})", v, character.get_dexterity_modifier())).unwrap_or("N/A".to_string());
+        let con_display = character.cons.map(|v| format!("{} ({})", v, character.get_constitution_modifier())).unwrap_or("N/A".to_string());
+        
+        self.add_output(format!("║ STR: {:<12} DEX: {:<12} CON: {:<12} ║", str_display, dex_display, con_display));
+        
+        let int_display = character.intl.map(|v| format!("{} ({})", v, character.get_intelligence_modifier())).unwrap_or("N/A".to_string());
+        let wis_display = character.wisd.map(|v| format!("{} ({})", v, character.get_wisdom_modifier())).unwrap_or("N/A".to_string());
+        let cha_display = character.chas.map(|v| format!("{} ({})", v, character.get_charisma_modifier())).unwrap_or("N/A".to_string());
+        
+        self.add_output(format!("║ INT: {:<12} WIS: {:<12} CHA: {:<12} ║", int_display, wis_display, cha_display));
+        
+        // Combat Stats Section
+        self.add_output("╠───────────────────────────────────────────────────────────────────────────────╣".to_string());
+        self.add_output("║ ⚔️ COMBAT STATISTICS                                                          ║".to_string());
+        self.add_output("╠───────────────────────────────────────────────────────────────────────────────╣".to_string());
+        
+        let hp_display = character.hp.map(|h| h.to_string()).unwrap_or("N/A".to_string());
+        let ac_display = character.ac.map(|a| a.to_string()).unwrap_or("N/A".to_string());
+        let speed_display = character.speed.map(|s| format!("{} ft", s)).unwrap_or("N/A".to_string());
+        let init_display = character.initiative.map(|i| i.to_string()).unwrap_or("N/A".to_string());
+        
+        self.add_output(format!("║ HP: {:<8} AC: {:<8} Speed: {:<8} Initiative: {:<8} ║", hp_display, ac_display, speed_display, init_display));
+        
+        // Skills and Proficiencies Section
+        self.add_output("╠───────────────────────────────────────────────────────────────────────────────╣".to_string());
+        self.add_output("║ 🎯 SKILLS & PROFICIENCIES                                                    ║".to_string());
+        self.add_output("╠───────────────────────────────────────────────────────────────────────────────╣".to_string());
+        
+        let prof_bonus = character.prof_bonus.map(|p| format!("+{}", p)).unwrap_or("N/A".to_string());
+        let pass_perc = character.passive_perception.map(|p| p.to_string()).unwrap_or("Auto-calc".to_string());
+        
+        self.add_output(format!("║ Proficiency Bonus: {:<10} Passive Perception: {:<10}           ║", prof_bonus, pass_perc));
+        
+        // Equipment Section  
+        self.add_output("╠───────────────────────────────────────────────────────────────────────────────╣".to_string());
+        self.add_output("║ 🎒 INVENTORY & SPELLS                                                        ║".to_string());
+        self.add_output("╠───────────────────────────────────────────────────────────────────────────────╣".to_string());
+        
+        if !character.inventory.is_empty() {
+            let inventory_display = character.inventory.join(", ");
+            let inventory_short = if inventory_display.len() > 60 { 
+                format!("{}...", &inventory_display[..57])
+            } else { 
+                inventory_display
+            };
+            self.add_output(format!("║ Inventory: {:<64} ║", inventory_short));
+        } else {
+            self.add_output("║ Inventory: Empty                                                            ║".to_string());
         }
         
-        if let Some(class) = &character.class {
-            self.add_output(format!("Class: {}", class));
+        // Spells Section
+        if !character.spells.is_empty() {
+            let spells_display = character.spells.join(", ");
+            let spells_short = if spells_display.len() > 60 { 
+                format!("{}...", &spells_display[..57])
+            } else { 
+                spells_display 
+            };
+            self.add_output(format!("║ Spells: {:<67} ║", spells_short));
+        } else {
+            self.add_output("║ Spells: None                                                                ║".to_string());
         }
         
-        if let Some(race) = &character.race {
-            self.add_output(format!("Race: {}", race));
+        // Description/Notes Section
+        if let Some(ref desc) = character.desc {
+            self.add_output("╠───────────────────────────────────────────────────────────────────────────────╣".to_string());
+            self.add_output("║ 📝 DESCRIPTION                                                               ║".to_string());
+            self.add_output("╠───────────────────────────────────────────────────────────────────────────────╣".to_string());
+            let desc_short = if desc.len() > 60 { 
+                format!("{}...", &desc[..57])
+            } else { 
+                desc.clone() 
+            };
+            self.add_output(format!("║ {:<77} ║", desc_short));
         }
         
+        self.add_output("╚═══════════════════════════════════════════════════════════════════════════════╝".to_string());
         self.add_output("".to_string());
-        
-        // Ability Scores
-        self.add_output("Ability Scores:".to_string());
-        if let Some(str_val) = character.stre {
-            self.add_output(format!("  Strength: {} ({})", str_val, character.get_strength_modifier()));
-        }
-        if let Some(dex_val) = character.dext {
-            self.add_output(format!("  Dexterity: {} ({})", dex_val, character.get_dexterity_modifier()));
-        }
-        if let Some(con_val) = character.cons {
-            self.add_output(format!("  Constitution: {} ({})", con_val, character.get_constitution_modifier()));
-        }
-        if let Some(int_val) = character.intl {
-            self.add_output(format!("  Intelligence: {} ({})", int_val, character.get_intelligence_modifier()));
-        }
-        if let Some(wis_val) = character.wisd {
-            self.add_output(format!("  Wisdom: {} ({})", wis_val, character.get_wisdom_modifier()));
-        }
-        if let Some(cha_val) = character.chas {
-            self.add_output(format!("  Charisma: {} ({})", cha_val, character.get_charisma_modifier()));
-        }
-        
+    }
+
+    fn display_combat_contact_card(&mut self, combatant: &crate::combat::Combatant) {
         self.add_output("".to_string());
+        self.add_output("┌─────────────────────── COMBAT CONTACT CARD ──────────────────────────┐".to_string());
+        self.add_output(format!("│ 🎭 {} {}", combatant.name, " ".repeat(67_i32.saturating_sub(combatant.name.len() as i32) as usize)));
+        self.add_output("├─────────────────────────────────────────────────────────────────────┤".to_string());
         
-        // Combat Stats
-        if let (Some(hp), Some(ac)) = (character.hp, character.ac) {
-            self.add_output(format!("HP: {}, AC: {}", hp, ac));
+        // Core Combat Stats
+        let hp_status = if combatant.current_hp <= combatant.max_hp / 4 {
+            "🩸 BLOODIED"
+        } else if combatant.current_hp == 0 {
+            "💀 DOWN"
+        } else {
+            "❤️ HEALTHY"
+        };
+        
+        self.add_output(format!("│ HP: {}/{} {} │", 
+            combatant.current_hp, combatant.max_hp, 
+            hp_status
+        ));
+        self.add_output(format!("│ AC: {} │", combatant.ac));
+        self.add_output(format!("│ Initiative: {} │", combatant.initiative));
+        
+        // Temporary HP if any
+        if combatant.temp_hp > 0 {
+            self.add_output(format!("│ Temp HP: {} │", combatant.temp_hp));
         }
         
-        if let Some(speed) = character.speed {
-            self.add_output(format!("Speed: {} ft", speed));
+        // Status Effects
+        if !combatant.status_effects.is_empty() {
+            self.add_output("├─────────────────────────────────────────────────────────────────────┤".to_string());
+            self.add_output("│ 🎯 ACTIVE STATUS EFFECTS: │".to_string());
+            for effect in &combatant.status_effects {
+                let duration_text = if let Some(duration) = effect.duration {
+                    format!(" ({} rounds)", duration)
+                } else {
+                    " (permanent)".to_string()
+                };
+                self.add_output(format!("│   • {}{} │", effect.name, duration_text));
+            }
         }
+        
+        // Try to get full character stats if it's a player character
+        if let Some(character) = self.characters.iter().find(|c| c.name == combatant.name) {
+            // Extract all data first to avoid borrowing issues
+            let str_mod = character.get_strength_modifier();
+            let dex_mod = character.get_dexterity_modifier();
+            let con_mod = character.get_constitution_modifier();
+            let int_mod = character.get_intelligence_modifier();
+            let wis_mod = character.get_wisdom_modifier();
+            let cha_mod = character.get_charisma_modifier();
+            let prof_bonus = character.prof_bonus;
+            let speed = character.speed;
+            
+            // Now use the extracted data
+            self.add_output("├─────────────────────────────────────────────────────────────────────┤".to_string());
+            self.add_output("│ 📊 ABILITY MODIFIERS: │".to_string());
+            
+            self.add_output(format!("│   STR: {} │ DEX: {} │ CON: {} │ INT: {} │ WIS: {} │ CHA: {} │", 
+                str_mod, dex_mod, con_mod, int_mod, wis_mod, cha_mod));
+            
+            if let Some(prof_bonus) = prof_bonus {
+                self.add_output(format!("│ Proficiency Bonus: +{} │", prof_bonus));
+            }
+            
+            if let Some(speed) = speed {
+                self.add_output(format!("│ Speed: {} ft │", speed));
+            }
+        }
+        
+        self.add_output("└─────────────────────────────────────────────────────────────────────┘".to_string());
+        self.add_output("💡 Quick Combat Reference - Type 'help' for available actions".to_string());
+        self.add_output("".to_string());
     }
 
     fn generate_random_npc(&mut self) {
         use crate::races_classes::{get_random_race, get_random_class};
         
-        self.add_output("🎲 Generating random NPC...".to_string());
+        self.add_output("🎲 Generating comprehensive random NPC...".to_string());
         
         let race = get_random_race();
         let class = get_random_class();
+        
+        // Generate all stats
         let ac = (rand::random::<u8>() % 11) + 10; // 10-20
         let hp = (rand::random::<u8>() % 41) + 10; // 10-50
         let speed = ((rand::random::<u8>() % 7) + 2) * 10; // 20-80
+        let level = (rand::random::<u8>() % 10) + 1; // 1-10
+        
+        // Generate ability scores (rolling 4d6 drop lowest)
+        let mut abilities = Vec::new();
+        for _ in 0..6 {
+            let mut rolls = vec![];
+            for _ in 0..4 {
+                rolls.push((rand::random::<u8>() % 6) + 1);
+            }
+            rolls.sort_by(|a, b| b.cmp(a)); // Sort descending
+            let total: u8 = rolls[0] + rolls[1] + rolls[2]; // Take top 3
+            abilities.push(total);
+        }
+        
+        let (str_score, dex_score, con_score, int_score, wis_score, cha_score) = 
+            (abilities[0], abilities[1], abilities[2], abilities[3], abilities[4], abilities[5]);
+        
+        // Calculate modifiers
+        let str_mod = ((str_score as i32) - 10) / 2;
+        let dex_mod = ((dex_score as i32) - 10) / 2;
+        let con_mod = ((con_score as i32) - 10) / 2;
+        let int_mod = ((int_score as i32) - 10) / 2;
+        let wis_mod = ((wis_score as i32) - 10) / 2;
+        let cha_mod = ((cha_score as i32) - 10) / 2;
+        
+        let prof_bonus = ((level - 1) / 4) + 2; // Standard proficiency progression
+        let passive_perception = 10 + wis_mod + prof_bonus as i32;
         
         self.add_output("".to_string());
-        self.add_output("╔═══════════════════════════════════════╗".to_string());
-        self.add_output("║            Generated NPC              ║".to_string());
-        self.add_output("╠═══════════════════════════════════════╣".to_string());
-        self.add_output(format!("║ Race: {:<31} ║", race));
-        self.add_output(format!("║ Class: {:<30} ║", class));
-        self.add_output(format!("║ AC: {:<33} ║", ac));
-        self.add_output(format!("║ HP: {:<33} ║", hp));
-        self.add_output(format!("║ Speed: {} feet{:<21} ║", speed, ""));
-        self.add_output("╚═══════════════════════════════════════╝".to_string());
+        self.add_output("╔═══════════════════════════════════════════════════════════════════════════════╗".to_string());
+        self.add_output("║ 🎭 COMPREHENSIVE GENERATED NPC                                               ║".to_string());
+        self.add_output("╠═══════════════════════════════════════════════════════════════════════════════╣".to_string());
+        self.add_output(format!("║ Race: {:<15} Class: {:<15} Level: {:<15} ║", race, class, level));
+        self.add_output("╠───────────────────────────────────────────────────────────────────────────────╣".to_string());
+        self.add_output("║ 💪 ABILITY SCORES                                                            ║".to_string());
+        self.add_output("╠───────────────────────────────────────────────────────────────────────────────╣".to_string());
+        self.add_output(format!("║ STR: {} ({:+})      DEX: {} ({:+})      CON: {} ({:+})               ║", 
+            str_score, str_mod, dex_score, dex_mod, con_score, con_mod));
+        self.add_output(format!("║ INT: {} ({:+})      WIS: {} ({:+})      CHA: {} ({:+})               ║", 
+            int_score, int_mod, wis_score, wis_mod, cha_score, cha_mod));
+        self.add_output("╠───────────────────────────────────────────────────────────────────────────────╣".to_string());
+        self.add_output("║ ⚔️ COMBAT STATISTICS                                                          ║".to_string());
+        self.add_output("╠───────────────────────────────────────────────────────────────────────────────╣".to_string());
+        self.add_output(format!("║ HP: {:<8} AC: {:<8} Speed: {} ft{:<8} Initiative: {:+}{}  ║", 
+            hp, ac, speed, "", dex_mod, " ".repeat(6)));
+        self.add_output(format!("║ Proficiency Bonus: +{:<5} Passive Perception: {:<10}          ║", 
+            prof_bonus, passive_perception));
+        self.add_output("╚═══════════════════════════════════════════════════════════════════════════════╝".to_string());
+        self.add_output("💡 This NPC has complete D&D 5e stats ready for use!".to_string());
     }
 
     fn generate_custom_npc(&mut self, race: &str, class: &str) {
-        self.add_output(format!("🎲 Generating {} {}...", race, class));
+        self.add_output(format!("🎲 Generating comprehensive {} {}...", race, class));
         
+        // Generate all stats
         let ac = (rand::random::<u8>() % 11) + 10; // 10-20
         let hp = (rand::random::<u8>() % 41) + 10; // 10-50
         let speed = ((rand::random::<u8>() % 7) + 2) * 10; // 20-80
+        let level = (rand::random::<u8>() % 10) + 1; // 1-10
+        
+        // Generate ability scores (rolling 4d6 drop lowest)
+        let mut abilities = Vec::new();
+        for _ in 0..6 {
+            let mut rolls = vec![];
+            for _ in 0..4 {
+                rolls.push((rand::random::<u8>() % 6) + 1);
+            }
+            rolls.sort_by(|a, b| b.cmp(a)); // Sort descending
+            let total: u8 = rolls[0] + rolls[1] + rolls[2]; // Take top 3
+            abilities.push(total);
+        }
+        
+        let (str_score, dex_score, con_score, int_score, wis_score, cha_score) = 
+            (abilities[0], abilities[1], abilities[2], abilities[3], abilities[4], abilities[5]);
+        
+        // Calculate modifiers
+        let str_mod = ((str_score as i32) - 10) / 2;
+        let dex_mod = ((dex_score as i32) - 10) / 2;
+        let con_mod = ((con_score as i32) - 10) / 2;
+        let int_mod = ((int_score as i32) - 10) / 2;
+        let wis_mod = ((wis_score as i32) - 10) / 2;
+        let cha_mod = ((cha_score as i32) - 10) / 2;
+        
+        let prof_bonus = ((level - 1) / 4) + 2; // Standard proficiency progression
+        let passive_perception = 10 + wis_mod + prof_bonus as i32;
         
         self.add_output("".to_string());
-        self.add_output("╔═══════════════════════════════════════╗".to_string());
-        self.add_output("║          Generated Custom NPC         ║".to_string());
-        self.add_output("╠═══════════════════════════════════════╣".to_string());
-        self.add_output(format!("║ Race: {:<31} ║", race));
-        self.add_output(format!("║ Class: {:<30} ║", class));
-        self.add_output(format!("║ AC: {:<33} ║", ac));
-        self.add_output(format!("║ HP: {:<33} ║", hp));
-        self.add_output(format!("║ Speed: {} feet{:<21} ║", speed, ""));
-        self.add_output("╚═══════════════════════════════════════╝".to_string());
+        self.add_output("╔═══════════════════════════════════════════════════════════════════════════════╗".to_string());
+        self.add_output("║ 🎭 COMPREHENSIVE CUSTOM NPC                                                  ║".to_string());
+        self.add_output("╠═══════════════════════════════════════════════════════════════════════════════╣".to_string());
+        self.add_output(format!("║ Race: {:<15} Class: {:<15} Level: {:<15} ║", race, class, level));
+        self.add_output("╠───────────────────────────────────────────────────────────────────────────────╣".to_string());
+        self.add_output("║ 💪 ABILITY SCORES                                                            ║".to_string());
+        self.add_output("╠───────────────────────────────────────────────────────────────────────────────╣".to_string());
+        self.add_output(format!("║ STR: {} ({:+})      DEX: {} ({:+})      CON: {} ({:+})               ║", 
+            str_score, str_mod, dex_score, dex_mod, con_score, con_mod));
+        self.add_output(format!("║ INT: {} ({:+})      WIS: {} ({:+})      CHA: {} ({:+})               ║", 
+            int_score, int_mod, wis_score, wis_mod, cha_score, cha_mod));
+        self.add_output("╠───────────────────────────────────────────────────────────────────────────────╣".to_string());
+        self.add_output("║ ⚔️ COMBAT STATISTICS                                                          ║".to_string());
+        self.add_output("╠───────────────────────────────────────────────────────────────────────────────╣".to_string());
+        self.add_output(format!("║ HP: {:<8} AC: {:<8} Speed: {} ft{:<8} Initiative: {:+}{}  ║", 
+            hp, ac, speed, "", dex_mod, " ".repeat(6)));
+        self.add_output(format!("║ Proficiency Bonus: +{:<5} Passive Perception: {:<10}          ║", 
+            prof_bonus, passive_perception));
+        self.add_output("╚═══════════════════════════════════════════════════════════════════════════════╝".to_string());
+        self.add_output("💡 This custom NPC has complete D&D 5e stats ready for use!".to_string());
     }
 
     fn roll_dice_with_display(&mut self, dice_expr: &str) {
@@ -1220,7 +1449,56 @@ impl App {
                 self.add_output("│         🎲 DICE ROLL! 🎲         │".to_string());
                 self.add_output("├─────────────────────────────────┤".to_string());
                 self.add_output(format!("│ Expression: {:<19} │", dice_expr));
-                self.add_output(format!("│ Individual Rolls: {:<13} │", format!("{:?}", rolls)));
+                
+                // Extract dice type for ASCII art
+                let dice_type = if let Some(d_pos) = dice_expr.find('d') {
+                    let after_d = &dice_expr[d_pos + 1..];
+                    let sides_str = after_d.chars()
+                        .take_while(|c| c.is_ascii_digit())
+                        .collect::<String>();
+                    sides_str.parse::<u8>().unwrap_or(6)
+                } else {
+                    6
+                };
+                
+                // Display ASCII art for each die (limit to 3 dice for space)
+                if rolls.len() <= 3 {
+                    self.add_output("├─────────────────────────────────┤".to_string());
+                    
+                    for (i, &roll) in rolls.iter().enumerate() {
+                        let ascii_art = crate::dice::get_dice_ascii_art(dice_type, roll);
+                        let color = crate::dice::get_dice_color_code(roll, dice_type);
+                        let reset = crate::dice::reset_color();
+                        
+                        self.add_output(format!("│ Die #{} (d{}):{}{}{}│", 
+                            i + 1, dice_type, 
+                            " ".repeat(19 - format!("Die #{} (d{}):", i + 1, dice_type).len()),
+                            color, reset
+                        ));
+                        
+                        for line in ascii_art {
+                            let padded_line = format!("{}{}{}", color, line, reset);
+                            let clean_line_len = line.len();
+                            let padding = if clean_line_len < 31 { 31 - clean_line_len } else { 0 };
+                            self.add_output(format!("│{}{}{} │", 
+                                padded_line, 
+                                " ".repeat(padding),
+                                color
+                            ));
+                        }
+                    }
+                } else {
+                    // For many dice, just show the values with colors
+                    let mut colored_rolls = Vec::new();
+                    for &roll in &rolls {
+                        let color = crate::dice::get_dice_color_code(roll, dice_type);
+                        let reset = crate::dice::reset_color();
+                        colored_rolls.push(format!("{}{}{}", color, roll, reset));
+                    }
+                    self.add_output(format!("│ Rolls: {:<22} │", colored_rolls.join(", ")));
+                }
+                
+                self.add_output("├─────────────────────────────────┤".to_string());
                 self.add_output(format!("│ TOTAL: {:<23} │", total));
                 
                 if let Some(message) = crit_message {
@@ -1326,21 +1604,28 @@ impl App {
                                 self.add_output(format!("✅ Found {} result(s):", results.len()));
                                 
                                 for (i, result) in results.iter().take(2).enumerate() { // Show max 2 results in combat
-                                    if results.len() > 1 {
-                                        self.add_output(format!("--- Result {} ---", i + 1));
-                                    }
+                                    self.add_output("┌─ Quick Reference ─────────────────┐".to_string());
+                                    self.add_output(format!("│ 📝 {} - {}", result.name(), result.page.content_type.to_uppercase()));
+                                    self.add_output("├───────────────────────────────────┤".to_string());
                                     
-                                    self.add_output(format!("📝 {}: {}", result.index(), result.name()));
-                                    
-                                    // Display key info only (first 10 lines)
+                                    // Display key info only (first 8 lines)
                                     let content_lines: Vec<&str> = result.page.content.lines().collect();
-                                    for line in content_lines.iter().take(10) {
-                                        self.add_output(line.to_string());
+                                    for line in content_lines.iter().take(8) {
+                                        let trimmed = line.trim();
+                                        if !trimmed.is_empty() {
+                                            if trimmed.contains(':') && trimmed.len() < 60 {
+                                                self.add_output(format!("│ 📊 {}", trimmed));
+                                            } else {
+                                                self.add_output(format!("│   {}", trimmed));
+                                            }
+                                        }
                                     }
                                     
-                                    if content_lines.len() > 10 {
-                                        self.add_output(format!("... (use search mode for full details)"));
+                                    if content_lines.len() > 8 {
+                                        self.add_output("│ ... (use search mode for full details)".to_string());
                                     }
+                                    
+                                    self.add_output("└───────────────────────────────────┘".to_string());
                                     
                                     if i == 0 && results.len() > 1 {
                                         self.add_output("".to_string());
@@ -1396,24 +1681,29 @@ impl App {
                                 
                                 for (i, result) in results.iter().enumerate() {
                                     if results.len() > 1 {
-                                        self.add_output(format!("--- Result {} ---", i + 1));
+                                        self.add_output(format!("┌─ Result {} ─────────────────────────────┐", i + 1));
+                                    } else {
+                                        self.add_output("┌─ Search Result ─────────────────────────┐".to_string());
                                     }
                                     
-                                    // Display result information
-                                    self.add_output(format!("📝 Name: {}", result.name()));
-                                    self.add_output(format!("🏷️ Type: {}", result.index()));
-                                    self.add_output(format!("🔗 Source: {}", result.page.url));
-                                    self.add_output("".to_string());
+                                    // Header with name and type in a nice format
+                                    let name = result.name();
+                                    let content_type = result.page.content_type.to_uppercase();
+                                    self.add_output(format!("│ 📝 {} - {} ", name, content_type));
+                                    self.add_output("├─────────────────────────────────────────┤".to_string());
                                     
-                                    // Display content with line breaks
-                                    let content_lines: Vec<&str> = result.page.content.lines().collect();
-                                    for line in content_lines.iter().take(20) { // Show first 20 lines
-                                        self.add_output(line.to_string());
-                                    }
+                                    // URL source  
+                                    self.add_output(format!("│ 🔗 Source: {}", result.page.url));
+                                    self.add_output("├─────────────────────────────────────────┤".to_string());
                                     
-                                    if content_lines.len() > 20 {
-                                        self.add_output(format!("... ({} more lines)", content_lines.len() - 20));
-                                    }
+                                    // Format content in readable columns
+                                    self.format_search_content_for_tui(&result.page.content);
+                                    
+                                    self.add_output("└─────────────────────────────────────────┘".to_string());
+                                    
+                                    // Attribution footer
+                                    self.add_output("📄 Source: dnd5e.wikidot.com | CC BY-SA 3.0".to_string());
+                                    self.add_output("ℹ️  Educational use - see license at link above".to_string());
                                     
                                     if i < results.len() - 1 {
                                         self.add_output("".to_string());
@@ -1433,6 +1723,80 @@ impl App {
                 self.add_output("Search functionality unavailable.".to_string());
             }
         }
+    }
+
+    fn format_search_content_for_tui(&mut self, content: &str) {
+        let lines: Vec<&str> = content.lines().collect();
+        let max_lines = 25; // Limit content to keep it readable
+        
+        for (line_num, line) in lines.iter().enumerate() {
+            if line_num >= max_lines {
+                self.add_output(format!("│ ... ({} more lines) [scroll or CLI for full]", lines.len() - max_lines));
+                break;
+            }
+            
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            
+            // Format different types of content
+            if self.is_stat_line(trimmed) {
+                // Format as stat line with icon
+                self.add_output(format!("│ 📊 {}", trimmed));
+            } else if self.is_heading_line(trimmed) {
+                // Format as heading with separator
+                self.add_output(format!("│ 🔸 {}", trimmed.to_uppercase()));
+                self.add_output(format!("│ {}", "─".repeat(trimmed.len().min(35))));
+            } else if trimmed.len() > 80 {
+                // Wrap long lines
+                let wrapped = self.wrap_content_line(trimmed, 75);
+                for wrapped_line in wrapped {
+                    self.add_output(format!("│   {}", wrapped_line));
+                }
+            } else {
+                // Regular content line
+                self.add_output(format!("│   {}", trimmed));
+            }
+        }
+    }
+    
+    fn is_stat_line(&self, line: &str) -> bool {
+        // Lines that look like "Casting Time: 1 action" or "Range: 150 feet"
+        line.contains(':') && line.len() < 60 && line.split(':').count() == 2
+    }
+    
+    fn is_heading_line(&self, line: &str) -> bool {
+        // Simple heuristics for headings - short lines that are likely titles
+        line.len() < 50 && 
+        (line.ends_with(':') || 
+         line.chars().all(|c| c.is_alphanumeric() || c.is_whitespace() || c == '\'' || c == '-') &&
+         line.split_whitespace().count() <= 5)
+    }
+    
+    fn wrap_content_line(&self, text: &str, max_width: usize) -> Vec<String> {
+        let mut lines = Vec::new();
+        let mut current_line = String::new();
+        
+        for word in text.split_whitespace() {
+            if current_line.len() + word.len() + 1 > max_width {
+                if !current_line.is_empty() {
+                    lines.push(current_line);
+                    current_line = String::new();
+                }
+            }
+            
+            if !current_line.is_empty() {
+                current_line.push(' ');
+            }
+            current_line.push_str(word);
+        }
+        
+        if !current_line.is_empty() {
+            lines.push(current_line);
+        }
+        
+        lines
     }
 }
 
